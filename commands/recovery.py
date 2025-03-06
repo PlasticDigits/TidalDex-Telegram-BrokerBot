@@ -5,7 +5,6 @@ Provides functionality to restore a wallet from a private key and backup existin
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import db
-import wallet
 from wallet.utils import validate_address
 from eth_account import Account
 import logging

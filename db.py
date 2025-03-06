@@ -109,19 +109,57 @@ def save_db(data):
         json.dump(data, f)
 
 def get_user_wallet(user_id):
-    """Get wallet for a specific user"""
+    """Get active wallet for a specific user"""
     db = load_db()
-    wallet_data = db.get(str(user_id))
+    user_data = db.get(str(user_id), {})
+    
+    # Check if user has any wallets
+    if not user_data or 'wallets' not in user_data or not user_data['wallets']:
+        return None
+    
+    # Get active wallet or default to first wallet
+    active_wallet_name = user_data.get('active_wallet')
+    wallet_data = None
+    
+    if active_wallet_name and active_wallet_name in user_data['wallets']:
+        wallet_data = user_data['wallets'][active_wallet_name]
+    else:
+        # Get the first wallet if no active wallet is set
+        wallet_name = next(iter(user_data['wallets']))
+        wallet_data = user_data['wallets'][wallet_name]
+        # Set as active wallet
+        user_data['active_wallet'] = wallet_name
+        db[str(user_id)] = user_data
+        save_db(db)
     
     if wallet_data and 'private_key' in wallet_data:
         # Decrypt the private key before returning
         encrypted_key = wallet_data['private_key']
+        wallet_data = wallet_data.copy()  # Make a copy to avoid modifying the original
         wallet_data['private_key'] = decrypt_private_key(encrypted_key, user_id)
     
     return wallet_data
 
-def save_user_wallet(user_id, wallet_data):
+def save_user_wallet(user_id, wallet_data, wallet_name="Default"):
     """Save wallet for a specific user with encrypted private key"""
+    user_id_str = str(user_id)
+    db = load_db()
+    
+    # Initialize user data structure if doesn't exist
+    if user_id_str not in db:
+        db[user_id_str] = {
+            'wallets': {},
+            'active_wallet': wallet_name
+        }
+    
+    # Initialize wallets dict if doesn't exist
+    if 'wallets' not in db[user_id_str]:
+        db[user_id_str]['wallets'] = {}
+    
+    # Set active wallet if not set
+    if 'active_wallet' not in db[user_id_str]:
+        db[user_id_str]['active_wallet'] = wallet_name
+    
     if wallet_data and 'private_key' in wallet_data:
         # Make a copy to avoid modifying the original
         wallet_copy = wallet_data.copy()
@@ -131,30 +169,83 @@ def save_user_wallet(user_id, wallet_data):
         wallet_copy['private_key'] = encrypt_private_key(private_key, user_id)
         
         # Save to database
-        db = load_db()
-        db[str(user_id)] = wallet_copy
+        db[user_id_str]['wallets'][wallet_name] = wallet_copy
         save_db(db)
     else:
         # Save as is if no private key
-        db = load_db()
-        db[str(user_id)] = wallet_data
+        db[user_id_str]['wallets'][wallet_name] = wallet_data
         save_db(db)
 
-def delete_user_wallet(user_id):
-    """Delete wallet for a specific user"""
+def delete_user_wallet(user_id, wallet_name=None):
+    """Delete a specific wallet or all wallets for a user"""
     user_id_str = str(user_id)
-    
-    # Delete from wallet DB
     db = load_db()
-    if user_id_str in db:
-        del db[user_id_str]
-        save_db(db)
-        
-        # Also delete user's salt if it exists
-        salts = load_salts()
-        if user_id_str in salts:
-            del salts[user_id_str]
-            save_salts(salts)
-        
-        return True
-    return False 
+    
+    if user_id_str not in db:
+        return False
+    
+    if wallet_name:
+        # Delete a specific wallet
+        if 'wallets' in db[user_id_str] and wallet_name in db[user_id_str]['wallets']:
+            del db[user_id_str]['wallets'][wallet_name]
+            
+            # If active wallet was deleted, set a new active wallet
+            if db[user_id_str].get('active_wallet') == wallet_name:
+                if db[user_id_str]['wallets']:
+                    # Set first available wallet as active
+                    db[user_id_str]['active_wallet'] = next(iter(db[user_id_str]['wallets']))
+                else:
+                    db[user_id_str]['active_wallet'] = None
+            
+            save_db(db)
+            return True
+    else:
+        # Delete all wallets and user data
+        if user_id_str in db:
+            del db[user_id_str]
+            save_db(db)
+            
+            # Also delete user's salt if it exists
+            salts = load_salts()
+            if user_id_str in salts:
+                del salts[user_id_str]
+                save_salts(salts)
+            
+            return True
+    
+    return False
+
+def get_user_wallets(user_id):
+    """Get all wallets for a specific user"""
+    db = load_db()
+    user_data = db.get(str(user_id), {})
+    
+    if not user_data or 'wallets' not in user_data:
+        return {}
+    
+    # Return wallet names and addresses (no private keys)
+    wallets = {}
+    active_wallet = user_data.get('active_wallet')
+    
+    for name, wallet in user_data['wallets'].items():
+        wallets[name] = {
+            'address': wallet.get('address'),
+            'is_active': name == active_wallet
+        }
+    
+    return wallets
+
+def set_active_wallet(user_id, wallet_name):
+    """Set the active wallet for a user"""
+    user_id_str = str(user_id)
+    db = load_db()
+    
+    if user_id_str not in db or 'wallets' not in db[user_id_str]:
+        return False
+    
+    if wallet_name not in db[user_id_str]['wallets']:
+        return False
+    
+    db[user_id_str]['active_wallet'] = wallet_name
+    save_db(db)
+    return True 

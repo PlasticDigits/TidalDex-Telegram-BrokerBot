@@ -7,6 +7,7 @@ from telegram.error import TelegramError
 # Import custom modules
 from utils.chat import create_private_chat_wrapper
 from utils.config import TELEGRAM_BOT_TOKEN
+import db
 
 # Import command handlers from commands package
 from commands.start import start
@@ -26,6 +27,11 @@ from commands.recovery import (
     WAITING_FOR_PRIVATE_KEY
 )
 from commands.help import help_command, universal_help_command
+from commands.wallets import wallets_command, wallet_selection_callback, SELECTING_WALLET
+from commands.addwallet import (
+    addwallet_command, action_choice_callback, process_wallet_name, process_private_key as add_process_private_key,
+    CHOOSING_ACTION as ADD_CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY
+)
 
 # Enable logging
 logging.basicConfig(
@@ -52,7 +58,8 @@ def main() -> None:
     send_wrapper = create_private_chat_wrapper(send_command)
     backup_wrapper = create_private_chat_wrapper(backup_command)
     recover_wrapper = create_private_chat_wrapper(recover_command)
-    help_wrapper = create_private_chat_wrapper(help_command)
+    wallets_wrapper = create_private_chat_wrapper(wallets_command)
+    addwallet_wrapper = create_private_chat_wrapper(addwallet_command)
 
     # Add command handlers with the private chat wrappers
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -61,6 +68,28 @@ def main() -> None:
     application.add_handler(CommandHandler("receive", receive_wrapper))
     application.add_handler(CommandHandler("backup", backup_wrapper))
     application.add_handler(CommandHandler("help", universal_help_command))
+    
+    # Add conversation handler for switching wallets
+    wallets_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("wallets", wallets_wrapper)],
+        states={
+            SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^wallet:')],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
+    
+    # Add conversation handler for adding a new wallet
+    addwallet_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("addwallet", addwallet_wrapper)],
+        states={
+            ADD_CHOOSING_ACTION: [CallbackQueryHandler(action_choice_callback)],
+            ENTERING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_wallet_name)],
+            ENTERING_PRIVATE_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_process_private_key)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
     
     # Add conversation handler for sending funds
     send_conv_handler = ConversationHandler(
@@ -89,6 +118,8 @@ def main() -> None:
     
     application.add_handler(send_conv_handler)
     application.add_handler(recover_conv_handler)
+    application.add_handler(wallets_conv_handler)
+    application.add_handler(addwallet_conv_handler)
     
     # Add error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
