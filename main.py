@@ -3,8 +3,6 @@ import logging
 import sys
 import atexit
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
-from telegram import Update
-from telegram.error import TelegramError
 import traceback
 
 # Import custom modules

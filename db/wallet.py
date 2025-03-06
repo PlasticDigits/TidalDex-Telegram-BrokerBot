@@ -4,7 +4,7 @@ Database operations for wallets.
 import logging
 import traceback
 from db.connection import execute_query
-from db.utils import encrypt_data, decrypt_data
+from db.utils import encrypt_data, decrypt_data, hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -19,8 +19,9 @@ def get_user_wallet(user_id):
     Returns:
         dict: Wallet data with decrypted private key or None if not found
     """
-    user_id_str = str(user_id)
-    logger.debug(f"Getting wallet for user_id: {user_id_str}")
+    # Hash the user ID for database lookup
+    user_id_str = hash_user_id(user_id)
+    logger.debug(f"Getting wallet for hashed user_id: {user_id_str}")
     
     try:
         # Get the active wallet directly from the wallets table using is_active flag
@@ -85,8 +86,9 @@ def save_user_wallet(user_id, wallet_data, wallet_name="Default"):
         logger.warning(f"No wallet data provided for user {user_id}")
         return False
     
-    user_id_str = str(user_id)
-    logger.debug(f"Saving wallet '{wallet_name}' for user {user_id_str}")
+    # Hash the user ID for database storage
+    user_id_str = hash_user_id(user_id)
+    logger.debug(f"Saving wallet '{wallet_name}' for hashed user_id: {user_id_str}")
     logger.debug(f"Wallet address: {wallet_data.get('address')}")
     
     try:
@@ -147,7 +149,8 @@ def delete_user_wallet(user_id, wallet_name=None):
     Returns:
         bool: True if successful, False otherwise
     """
-    user_id_str = str(user_id)
+    # Hash the user ID for database operations
+    user_id_str = hash_user_id(user_id)
     
     try:
         if wallet_name:
@@ -209,7 +212,8 @@ def get_user_wallets(user_id):
     Returns:
         dict: A dictionary of wallet names to wallet info (address and active status)
     """
-    user_id_str = str(user_id)
+    # Hash the user ID for database lookup
+    user_id_str = hash_user_id(user_id)
     
     try:
         # Get all wallets with their active status
@@ -243,7 +247,8 @@ def set_active_wallet(user_id, wallet_name):
     Returns:
         bool: True if successful, False otherwise
     """
-    user_id_str = str(user_id)
+    # Hash the user ID for database operations
+    user_id_str = hash_user_id(user_id)
     
     try:
         # Check if wallet exists

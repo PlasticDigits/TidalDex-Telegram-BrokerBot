@@ -122,7 +122,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             wallets_text = "Your wallets:\n"
             for name, info in user_wallets.items():
                 prefix = "🔷 " if info['is_active'] else "○ "
-                wallets_text += f"{prefix}{name}: `{info['address'][:8]}...{info['address'][-6:]}`\n"
+                wallets_text += f"{prefix}{name}: `{info['address']}`\n"
             
             # Check if user has a master mnemonic
             logger.debug("Checking if user has a mnemonic")

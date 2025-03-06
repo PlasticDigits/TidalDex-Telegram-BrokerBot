@@ -180,3 +180,21 @@ def get_encryption_key_old(user_id):
         logger.error(f"Error getting encryption key: {e}")
         logger.error(traceback.format_exc())
         raise 
+
+def hash_user_id(user_id):
+    """
+    Create an irreversible hash of a user ID for database storage.
+    
+    Args:
+        user_id: User identifier (int or str)
+        
+    Returns:
+        str: Hexadecimal SHA-256 hash of the user ID
+    """
+    # Convert to string and encode to bytes
+    user_id_str = str(user_id).encode('utf-8')
+    
+    # Create SHA-256 hash
+    hashed = hashlib.sha256(user_id_str).hexdigest()
+    
+    return hashed 

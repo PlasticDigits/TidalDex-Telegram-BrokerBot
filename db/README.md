@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS wallets (
 
 All sensitive data (private keys and mnemonics) are encrypted before storage using Fernet symmetric encryption with a user-specific key. The encryption uses a random salt for each encryption operation and PBKDF2 key derivation.
 
+### User ID Protection
+
+For enhanced security, all user IDs are irreversibly hashed using SHA-256 before being stored in the database. This means:
+
+1. Actual Telegram user IDs are never stored in the database
+2. Even with database access, it's computationally infeasible to determine the original user IDs
+3. Data lookup is performed using the same hashing algorithm, ensuring consistent access
+
+This approach provides an additional layer of security and privacy for users.
+
 ## Usage
 
 ```python

@@ -4,7 +4,7 @@ Database operations for mnemonic seed phrases.
 import logging
 import traceback
 from db.connection import execute_query
-from db.utils import encrypt_data, decrypt_data
+from db.utils import encrypt_data, decrypt_data, hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -24,8 +24,9 @@ def save_user_mnemonic(user_id, mnemonic):
         logger.warning(f"No mnemonic provided for user {user_id}")
         return False
     
-    user_id_str = str(user_id)
-    logger.debug(f"Saving mnemonic for user {user_id_str}")
+    # Hash the user ID for database storage
+    user_id_str = hash_user_id(user_id)
+    logger.debug(f"Saving mnemonic for hashed user_id: {user_id_str}")
     
     try:
         # Encrypt the mnemonic
@@ -56,7 +57,8 @@ def get_user_mnemonic(user_id):
     Returns:
         str: The decrypted mnemonic phrase or None if not found
     """
-    user_id_str = str(user_id)
+    # Hash the user ID for database lookup
+    user_id_str = hash_user_id(user_id)
     
     try:
         result = execute_query(
@@ -85,7 +87,8 @@ def delete_user_mnemonic(user_id):
     Returns:
         bool: True if successful, False otherwise
     """
-    user_id_str = str(user_id)
+    # Hash the user ID for database operations
+    user_id_str = hash_user_id(user_id)
     
     try:
         execute_query(
@@ -98,4 +101,4 @@ def delete_user_mnemonic(user_id):
     except Exception as e:
         logger.error(f"Error deleting mnemonic for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
-        return False 
+        return False
