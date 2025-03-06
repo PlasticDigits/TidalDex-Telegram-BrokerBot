@@ -7,3 +7,5 @@ numpy==2.2.3
 eth-account==0.13.5
 cryptography==44.0.2
 tenacity==9.0.0
+mnemonic==0.21
+eth-utils==5.2.0

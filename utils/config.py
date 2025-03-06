@@ -26,4 +26,21 @@ def get_env_var(name, default=None):
 # Commonly used configuration variables
 BSC_RPC_URL = get_env_var('BSC_RPC_URL')
 TELEGRAM_BOT_TOKEN = get_env_var('TELEGRAM_BOT_TOKEN')
-ENCRYPTION_KEY = get_env_var('ENCRYPTION_KEY') 
+ENCRYPTION_KEY = get_env_var('ENCRYPTION_KEY')
+
+# Wallet derivation path settings
+DEFAULT_DERIVATION_PATH = "m/44'/60'/0'/0/0"  # Default path for first Ethereum account
+ACCOUNT_PATH_TEMPLATE = "m/44'/60'/0'/0/{}"   # Template for deriving multiple accounts
+
+# Database settings
+DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'tidaldex.db')
+DATABASE_RETRY_MAX_ATTEMPTS = 5  # Maximum number of retries for database operations
+DATABASE_RETRY_INITIAL_WAIT = 0.1  # Initial wait between retries in seconds (doubles with each retry)
+DATABASE_CONNECTION_TIMEOUT = 30.0  # Connection timeout in seconds
+
+# SQLite PRAGMA settings
+DB_PRAGMAS = {
+    "journal_mode": "MEMORY",  # In-memory journal for speed
+    "cache_size": 10000,       # Larger cache for better performance
+    "temp_store": "MEMORY",    # Store temp tables in memory
+} 

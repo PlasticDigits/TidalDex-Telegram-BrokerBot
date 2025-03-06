@@ -3,6 +3,9 @@ from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 import db
 import wallet
 import logging
+import traceback
+from wallet.mnemonic import derive_wallet_from_mnemonic
+from utils.message_security import send_self_destructing_message
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -69,21 +72,82 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Process based on action
     if user_temp_data[user_id]['action'] == 'create_wallet':
-        # Create new wallet
-        new_wallet = wallet.create_wallet()
-        db.save_user_wallet(user_id, new_wallet, wallet_name)
-        
-        await update.message.reply_text(
-            f"🎉 New wallet '{wallet_name}' created!\n\n"
-            f"Address: `{new_wallet['address']}`\n\n"
-            f"Private Key: `{new_wallet['private_key']}`\n\n"
-            "⚠️ IMPORTANT: Save your private key somewhere safe. "
-            "Anyone with access to your private key can access your wallet. "
-            "Your wallet is encrypted and cannot be recovered if lost. "
-            "I won't show it again for security reasons.",
-            parse_mode='Markdown'
-        )
-        
+        try:
+            # Check if user already has a mnemonic
+            existing_mnemonic = db.get_user_mnemonic(user_id)
+            
+            if existing_mnemonic:
+                # User has existing mnemonic, derive wallet with next index
+                logger.debug("User has existing mnemonic, deriving new wallet")
+                
+                # Get current wallet count to use as index
+                existing_wallets = db.get_user_wallets(user_id)
+                wallet_index = len(existing_wallets)
+                
+                # Derive a new wallet from the existing mnemonic
+                new_wallet = derive_wallet_from_mnemonic(existing_mnemonic, index=wallet_index)
+                
+                # Save the wallet
+                wallet_to_save = {
+                    'address': new_wallet['address'],
+                    'private_key': new_wallet['private_key'],
+                    'path': new_wallet['path']
+                }
+                
+                # Save wallet
+                db.save_user_wallet(user_id, wallet_to_save, wallet_name)
+                
+                # Normal message since no seed phrase is shown
+                await update.message.reply_text(
+                    f"🎉 New wallet '{wallet_name}' created from your existing seed phrase!\n\n"
+                    f"Address: `{new_wallet['address']}`\n\n"
+                    "This wallet is derived from your existing seed phrase, which you can recover using /backup.",
+                    parse_mode='Markdown'
+                )
+            else:
+                # User doesn't have a mnemonic, create a new one
+                logger.debug("User has no mnemonic, creating new one")
+                mnemonic = wallet.create_mnemonic()
+                
+                # Create a new wallet from the mnemonic
+                new_wallet = wallet.create_mnemonic_wallet(mnemonic)
+                
+                # Remove mnemonic from wallet object before saving
+                wallet_to_save = {
+                    'address': new_wallet['address'],
+                    'private_key': new_wallet['private_key'],
+                    'path': new_wallet['path']
+                }
+                
+                # Save wallet
+                db.save_user_wallet(user_id, wallet_to_save, wallet_name)
+                
+                # Save mnemonic separately
+                db.save_user_mnemonic(user_id, mnemonic)
+                
+                # Send self-destructing message with seed phrase
+                message_text = (
+                    f"🎉 New wallet '{wallet_name}' created with new seed phrase!\n\n"
+                    f"Address: `{new_wallet['address']}`\n\n"
+                    f"Seed Phrase: `{mnemonic}`\n\n"
+                    "⚠️ IMPORTANT: Write down and save your seed phrase somewhere safe.\n"
+                    "Anyone with access to your seed phrase can access your wallet.\n"
+                    "Your wallet is encrypted but cannot be recovered without this phrase."
+                )
+                
+                await send_self_destructing_message(
+                    update,
+                    message_text,
+                    parse_mode='Markdown'
+                )
+        except Exception as e:
+            logger.error(f"Error creating wallet: {e}")
+            logger.error(traceback.format_exc())
+            await update.message.reply_text(
+                "❌ Error creating wallet. Please try again with /addwallet.\n"
+                f"Error: {str(e)}"
+            )
+            
         # Clean up temp data
         del user_temp_data[user_id]
         return ConversationHandler.END

@@ -5,6 +5,7 @@ import wallet
 from utils import token
 from wallet.utils import validate_address
 from utils.status_updates import create_status_callback
+from utils.gas_estimation import estimate_bnb_transfer_gas, estimate_token_transfer_gas, estimate_max_bnb_transfer
 import logging
 
 # Enable logging
@@ -30,14 +31,16 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "What would you like to send?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Send All BNB", callback_data='send_bnb_all')],
-                [InlineKeyboardButton("Send All Token", callback_data='send_token_all')]
+                [InlineKeyboardButton("Send All Token", callback_data='send_token_all')],
+                [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
             ])
         )
     else:
         context.user_data['send_all'] = False
         keyboard = [
             [InlineKeyboardButton("Send BNB", callback_data='send_bnb')],
-            [InlineKeyboardButton("Send Token", callback_data='send_token')]
+            [InlineKeyboardButton("Send Token", callback_data='send_token')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -49,33 +52,45 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return CHOOSING_ACTION
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle button callbacks."""
+    """Handle button callbacks for the send process."""
     query = update.callback_query
     await query.answer()
     
-    if query.data == 'send_bnb':
-        await query.message.reply_text("Please enter the amount of BNB to send, or type `all` to send your entire balance:")
+    choice = query.data
+    
+    if choice == 'cancel':
+        await query.edit_message_text("Transaction cancelled.")
+        return ConversationHandler.END
+    
+    if choice == 'send_bnb':
+        await query.edit_message_text(
+            "💰 Please enter the amount of BNB to send:\n\n"
+            "You can type 'all' to send your entire balance.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_BNB_AMOUNT
-    elif query.data == 'send_bnb_all':
-        # Get the user's BNB balance
-        user_id = update.effective_user.id
-        user_wallet = db.get_user_wallet(user_id)
-        
-        if not user_wallet:
-            await query.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
-            return ConversationHandler.END
-        
-        # We'll calculate the exact amount in the next step, accounting for gas
+    
+    if choice == 'send_bnb_all':
         context.user_data['send_all_bnb'] = True
-        
-        await query.message.reply_text("Please enter the recipient address for sending all your BNB:")
+        await query.edit_message_text(
+            "You've chosen to send all your BNB. Please enter the recipient address:\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_BNB_ADDRESS
-    elif query.data == 'send_token':
-        await query.message.reply_text("Please enter the token symbol to send (e.g., BUSD):")
+    
+    if choice == 'send_token':
+        await query.edit_message_text(
+            "🪙 Please enter the token symbol (e.g., BUSD, CAKE):\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_TOKEN_SYMBOL
-    elif query.data == 'send_token_all':
-        await query.message.reply_text("Please enter the token symbol to send all of (e.g., BUSD):")
+    
+    if choice == 'send_token_all':
         context.user_data['send_all_token'] = True
+        await query.edit_message_text(
+            "You've chosen to send all of a token. Please enter the token symbol (e.g., BUSD, CAKE):\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_TOKEN_SYMBOL
     
     return ConversationHandler.END
@@ -84,28 +99,50 @@ async def send_bnb_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Process BNB amount and ask for recipient address."""
     input_text = update.message.text.strip()
     
+    # Check if user wants to cancel
+    if input_text.lower() == "/cancel":
+        await update.message.reply_text("Transaction cancelled.")
+        return ConversationHandler.END
+    
     # Check if user wants to send all
     if input_text.lower() == "all":
         context.user_data['send_all_bnb'] = True
-        await update.message.reply_text("You've chosen to send all your BNB. Please enter the recipient address:")
+        await update.message.reply_text(
+            "You've chosen to send all your BNB. Please enter the recipient address:\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_BNB_ADDRESS
     
     try:
         amount = float(input_text)
         if amount <= 0:
-            await update.message.reply_text("Amount must be greater than 0. Please try again:")
+            await update.message.reply_text(
+                "Amount must be greater than 0. Please try again:\n\n"
+                "Type /cancel to cancel the transaction."
+            )
             return SEND_BNB_AMOUNT
         
         context.user_data['send_amount'] = amount
-        await update.message.reply_text("Please enter the recipient address:")
+        await update.message.reply_text(
+            "Please enter the recipient address:\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_BNB_ADDRESS
     except ValueError:
-        await update.message.reply_text("Invalid amount. Please enter a number or type 'all' to send your entire balance:")
+        await update.message.reply_text(
+            "Invalid amount. Please enter a number or type 'all' to send your entire balance:\n\n"
+            "Type /cancel to cancel the transaction."
+        )
         return SEND_BNB_AMOUNT
 
 async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process recipient address and send BNB with status updates."""
     recipient_address = update.message.text.strip()
+    
+    # Check if user wants to cancel
+    if recipient_address.lower() == "/cancel":
+        await update.message.reply_text("Transaction cancelled.")
+        return ConversationHandler.END
     
     # Handle sending entire balance case differently
     send_all = context.user_data.get('send_all_bnb', False)
@@ -149,8 +186,6 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         # Get user address in checksum format
         user_address = user_wallet['address']
-        checksum_user_address = wallet.utils.validate_address(user_address)
-        checksum_recipient = wallet.utils.validate_address(valid_recipient)
         
         # Check user's BNB balance
         await status_callback("Checking your BNB balance...")
@@ -159,86 +194,60 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Calculate amount to send
         amount = None  # Will be set based on balance and gas estimate
         
-        # Estimate gas cost using web3
-        await status_callback("Estimating gas fees for transaction...")
-        from utils.web3_connection import w3
-        from web3 import Web3
-        
         if send_all:
-            # If sending all, estimate gas for a transaction sending the entire balance first
-            # Then subtract that gas cost from the balance to get the actual amount to send
-            
-            # Get current gas price
-            gas_price = w3.eth.gas_price
-            
-            # Estimate gas for the transaction (need to use a dummy amount for estimation)
-            # We'll use 90% of balance for estimation to ensure it's not over the actual balance
-            dummy_amount_wei = w3.to_wei(bnb_balance * 0.9, 'ether')
-            
-            gas_estimate = w3.eth.estimate_gas({
-                'to': checksum_recipient,
-                'from': checksum_user_address,
-                'value': dummy_amount_wei
-            })
-            
-            # Calculate total gas cost in BNB
-            gas_cost_wei = gas_price * gas_estimate
-            gas_cost_bnb = w3.from_wei(gas_cost_wei, 'ether')
-            
-            # Calculate the actual amount to send (entire balance minus gas cost)
-            amount = bnb_balance - gas_cost_bnb
-            
-            # Make sure amount is positive
-            if amount <= 0:
-                await status_callback(f"❌ Insufficient balance. Your balance of {bnb_balance} BNB is not enough to cover gas costs of {gas_cost_bnb} BNB.")
+            # If sending all, use utility function to calculate max amount
+            try:
+                amount = estimate_max_bnb_transfer(
+                    user_address,
+                    valid_recipient,
+                    bnb_balance,
+                    status_callback
+                )
+                await status_callback(f"Sending {amount} BNB (entire balance minus gas)")
+            except ValueError as e:
+                await status_callback(f"❌ Insufficient balance for gas fees.")
                 await response.edit_text(
-                    f"❌ Transaction failed: Insufficient balance for gas.\n\n"
-                    f"Your balance: {bnb_balance} BNB\n"
-                    f"Estimated gas cost: {gas_cost_bnb} BNB\n\n"
+                    f"❌ Transaction failed: {str(e)}\n\n"
                     f"Your balance is too low to send BNB after accounting for gas fees."
                 )
                 return ConversationHandler.END
-            
-            await status_callback(f"Sending {amount} BNB (entire balance minus gas)")
         else:
             # Regular case (not sending all)
             amount = context.user_data.get('send_amount')
             
-            # Convert amount to wei
-            amount_wei = w3.to_wei(amount, 'ether')
-            
-            # Get current gas price
-            gas_price = w3.eth.gas_price
-            
-            # Estimate gas for the transaction
-            gas_estimate = w3.eth.estimate_gas({
-                'to': checksum_recipient,
-                'from': checksum_user_address,
-                'value': amount_wei
-            })
-            
-            # Calculate total gas cost in BNB
-            gas_cost_wei = gas_price * gas_estimate
-            gas_cost_bnb = w3.from_wei(gas_cost_wei, 'ether')
-            
-            # No buffer needed as BSC has flat gas costs
-            required_amount = amount + gas_cost_bnb
-            
-            await status_callback(f"Estimated gas cost: {gas_cost_bnb} BNB")
-            
-            if bnb_balance < required_amount:
-                await status_callback(f"❌ Insufficient balance. You have {bnb_balance} BNB but need {required_amount} BNB (including gas).")
+            try:
+                # Use utility function to estimate gas
+                gas_info = estimate_bnb_transfer_gas(
+                    user_address, 
+                    valid_recipient, 
+                    amount, 
+                    status_callback
+                )
+                
+                gas_cost_bnb = gas_info['gas_bnb']
+                required_amount = amount + gas_cost_bnb
+                
+                if bnb_balance < required_amount:
+                    await status_callback(f"❌ Insufficient balance. You have {bnb_balance} BNB but need {required_amount} BNB (including gas).")
+                    await response.edit_text(
+                        f"❌ Transaction failed: Insufficient balance.\n\n"
+                        f"Your balance: {bnb_balance} BNB\n"
+                        f"Transaction amount: {amount} BNB\n"
+                        f"Estimated gas cost: {gas_cost_bnb} BNB\n"
+                        f"Total required: {required_amount} BNB\n\n"
+                        f"Please add funds to your wallet and try again."
+                    )
+                    return ConversationHandler.END
+                
+                await status_callback(f"✓ Balance sufficient: {bnb_balance} BNB")
+            except Exception as e:
+                logger.error(f"Error estimating gas: {e}")
                 await response.edit_text(
-                    f"❌ Transaction failed: Insufficient balance.\n\n"
-                    f"Your balance: {bnb_balance} BNB\n"
-                    f"Transaction amount: {amount} BNB\n"
-                    f"Estimated gas cost: {gas_cost_bnb} BNB\n"
-                    f"Total required: {required_amount} BNB\n\n"
-                    f"Please add funds to your wallet and try again."
+                    f"❌ Transaction failed: Error estimating gas.\n\n"
+                    f"Error: {str(e)}\n\n"
+                    f"Please try again later."
                 )
                 return ConversationHandler.END
-            
-            await status_callback(f"✓ Balance sufficient: {bnb_balance} BNB")
         
         # Send BNB with status updates
         tx_result = wallet.send_bnb(
@@ -268,12 +277,18 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def send_token_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process token symbol and ask for amount."""
-    token_symbol = update.message.text.strip().upper()
-    token_info = token.find_token(symbol=token_symbol)
+    symbol = update.message.text.strip().upper()
+    
+    # Check if user wants to cancel
+    if symbol.lower() == "/cancel":
+        await update.message.reply_text("Transaction cancelled.")
+        return ConversationHandler.END
+    
+    token_info = token.find_token(symbol=symbol)
     
     if not token_info:
         await update.message.reply_text(
-            f"Token {token_symbol} not found in the supported tokens list.\n"
+            f"Token {symbol} not found in the supported tokens list.\n"
             "Please enter a valid token symbol:"
         )
         return SEND_TOKEN_SYMBOL
@@ -282,15 +297,21 @@ async def send_token_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     # Check if we're sending the entire balance
     if context.user_data.get('send_all_token', False):
-        await update.message.reply_text(f"Please enter the recipient address to send all your {token_symbol}:")
+        await update.message.reply_text(f"Please enter the recipient address to send all your {symbol}:")
         return SEND_TOKEN_ADDRESS
     else:
-        await update.message.reply_text(f"Please enter the amount of {token_symbol} to send, or type `all` to send your entire balance:")
+        await update.message.reply_text(f"Please enter the amount of {symbol} to send, or type `all` to send your entire balance:")
         return SEND_TOKEN_AMOUNT
 
 async def send_token_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process token amount and ask for recipient address."""
     input_text = update.message.text.strip()
+    
+    # Check if user wants to cancel
+    if input_text.lower() == "/cancel":
+        await update.message.reply_text("Transaction cancelled.")
+        return ConversationHandler.END
+    
     token_info = context.user_data.get('token_info')
     
     # Check if user wants to send all
@@ -315,6 +336,12 @@ async def send_token_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process recipient address and send token with status updates."""
     recipient_address = update.message.text.strip()
+    
+    # Check if user wants to cancel
+    if recipient_address.lower() == "/cancel":
+        await update.message.reply_text("Transaction cancelled.")
+        return ConversationHandler.END
+    
     token_info = context.user_data.get('token_info')
     
     # Handle sending entire balance case differently
@@ -363,15 +390,10 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # Get user address in checksum format
         user_address = user_wallet['address']
-        checksum_user_address = wallet.utils.validate_address(user_address)
-        checksum_recipient = wallet.utils.validate_address(valid_recipient)
         
         # Get token contract and balance
         await status_callback(f"Checking your {token_info['symbol']} balance...")
-        from utils.web3_connection import w3
-        from utils.token_operations import get_token_contract, convert_to_raw_amount
         
-        token_contract = get_token_contract(valid_token_address)
         token_balance_info = wallet.get_token_balance(valid_token_address, user_address)
         token_balance = token_balance_info['balance']
         decimals = token_balance_info['decimals']
@@ -396,37 +418,19 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         await status_callback(f"✓ Token balance sufficient: {token_balance} {token_info['symbol']}")
         
-        # Estimate gas cost using web3
-        await status_callback("Estimating gas fees for transaction...")
-        
-        # Convert token amount to raw amount
-        token_amount = convert_to_raw_amount(amount, decimals)
-        
-        # Get current gas price
-        gas_price = w3.eth.gas_price
-        
-        # Prepare the transfer function data to estimate gas
-        transfer_function = token_contract.functions.transfer(
-            checksum_recipient,
-            token_amount
-        )
-        
-        # Estimate gas
+        # Use utility function to estimate gas
         try:
-            gas_estimate = transfer_function.estimate_gas({
-                'from': checksum_user_address
-            })
+            gas_info = estimate_token_transfer_gas(
+                user_address,
+                valid_recipient,
+                valid_token_address,
+                amount,
+                decimals,
+                status_callback
+            )
             
-            # Calculate total gas cost in BNB
-            gas_cost_wei = gas_price * gas_estimate
-            gas_cost_bnb = w3.from_wei(gas_cost_wei, 'ether')
-            
-            # No buffer needed as BSC has flat gas costs
-            gas_required = gas_cost_bnb
-            
-            await status_callback(f"Estimated gas cost: {gas_cost_bnb} BNB")
+            gas_required = gas_info['gas_bnb']
         except Exception as e:
-            # If gas estimation fails, use a conservative default
             logger.warning(f"Gas estimation failed: {e}. Using default estimate.")
             await status_callback("Gas estimation failed. Using conservative default value.")
             gas_required = 0.002  # Default gas cost for BSC token transfers

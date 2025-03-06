@@ -2,3 +2,8 @@
 __pycache__/
 wallets.json
 .salts.json
+wallets.db
+wallets.db*
+bot.log
+data/tidaldex.db
+data/tidaldex.db*
