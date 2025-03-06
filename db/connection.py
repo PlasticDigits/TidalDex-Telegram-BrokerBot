@@ -260,6 +260,14 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
                 UNIQUE(user_id, name)
             );
+            
+            -- PIN attempts table for tracking failed attempts
+            CREATE TABLE IF NOT EXISTS pin_attempts (
+                user_id TEXT PRIMARY KEY,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                last_attempt_time INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            );
         ''')
         
         conn.commit()

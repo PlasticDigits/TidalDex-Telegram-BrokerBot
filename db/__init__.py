@@ -26,6 +26,12 @@ from db.pin import (
     save_user_pin, get_user_pin_hash, has_pin
 )
 
+# Import PIN attempt operations
+from db.pin_attempt import (
+    get_pin_attempt_data, save_pin_attempt_data, reset_pin_attempts,
+    increment_pin_attempt, create_pin_attempts_table
+)
+
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -44,4 +50,8 @@ __all__ = [
     
     # PIN operations
     'save_user_pin', 'get_user_pin_hash', 'has_pin',
+    
+    # PIN attempt operations
+    'get_pin_attempt_data', 'save_pin_attempt_data', 'reset_pin_attempts',
+    'increment_pin_attempt',
 ] 

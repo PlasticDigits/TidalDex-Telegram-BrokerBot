@@ -6,7 +6,7 @@ import logging
 from telegram import Message, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext
 from telegram.error import TelegramError
-from utils.pin_ops import verify_pin, has_pin
+from utils.pin_ops import verify_pin, has_pin, can_attempt_pin
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +14,6 @@ logger = logging.getLogger(__name__)
 SHOW_SENSITIVE_INFO = "show_sensitive_info:"
 DELETE_NOW = "delete_sensitive_info:"
 VERIFY_PIN = "verify_pin:"
-
-# Store PIN verification attempts
-pin_verification_attempts = {}
-MAX_PIN_ATTEMPTS = 3
 
 async def send_self_destructing_message(update: Update, context: CallbackContext, text: str, parse_mode: str = None, countdown_seconds: int = 10):
     """
@@ -59,9 +55,6 @@ async def send_self_destructing_message(update: Update, context: CallbackContext
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
-            
-            # Initialize PIN verification attempts
-            pin_verification_attempts[user_id] = 0
         else:
             # Create warning message with inline keyboard
             keyboard = [
@@ -127,6 +120,20 @@ async def verify_pin_callback(update: Update, context: CallbackContext):
         await query.edit_message_text("❌ Information expired or not available.")
         return
     
+    # Check if user is in a lockout period due to too many failed attempts
+    can_attempt, lockout_remaining = can_attempt_pin(user_id)
+    if not can_attempt:
+        # User is in lockout period
+        minutes = lockout_remaining // 60
+        seconds = lockout_remaining % 60
+        time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
+        
+        await query.edit_message_text(
+            f"⚠️ Your account is temporarily locked due to too many failed PIN attempts.\n\n"
+            f"Please try again in {time_str}."
+        )
+        return
+    
     # Ask user to enter PIN
     await query.edit_message_text(
         "🔐 Please enter your PIN to continue.\n\n"
@@ -160,6 +167,30 @@ async def process_pin_verification(update: Update, context: CallbackContext):
     if 'pin_verification' not in context.user_data or user_id not in context.user_data['pin_verification']:
         return
     
+    # Check if user is in a lockout period
+    can_attempt, lockout_remaining = can_attempt_pin(user_id)
+    if not can_attempt:
+        # User is in lockout period
+        minutes = lockout_remaining // 60
+        seconds = lockout_remaining % 60
+        time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
+        
+        # Get the verification message ID
+        verification_data = context.user_data['pin_verification'][user_id]
+        verification_message_id = verification_data.get('verification_message_id')
+        
+        # Update the message to inform about lockout
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=verification_message_id,
+            text=f"⚠️ Your account is temporarily locked due to too many failed PIN attempts.\n\n"
+                 f"Please try again in {time_str}."
+        )
+        
+        # Clean up verification data
+        del context.user_data['pin_verification'][user_id]
+        return
+    
     # Get the message ID for the sensitive content
     verification_data = context.user_data['pin_verification'][user_id]
     message_id = verification_data.get('message_id')
@@ -183,22 +214,25 @@ async def process_pin_verification(update: Update, context: CallbackContext):
         # Clean up verification data
         del context.user_data['pin_verification'][user_id]
     else:
-        # PIN is incorrect
-        pin_verification_attempts[user_id] = pin_verification_attempts.get(user_id, 0) + 1
+        # Check if user is now in a lockout period after this failed attempt
+        can_attempt, lockout_remaining = can_attempt_pin(user_id)
         
-        if pin_verification_attempts[user_id] >= MAX_PIN_ATTEMPTS:
-            # Too many failed attempts
+        if not can_attempt:
+            # User is now in lockout period
+            minutes = lockout_remaining // 60
+            seconds = lockout_remaining % 60
+            time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
+            
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=verification_message_id,
-                text="❌ Too many failed PIN attempts. Operation cancelled for security."
+                text=f"❌ Incorrect PIN. Too many failed attempts.\n\n"
+                     f"Your account is temporarily locked for {time_str}."
             )
             
             # Clean up verification data
             del context.user_data['pin_verification'][user_id]
-            if user_id in pin_verification_attempts:
-                del pin_verification_attempts[user_id]
-                
+            
             # Delete the sensitive data
             if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
                 del context.user_data['sensitive_messages'][message_id]
@@ -207,7 +241,7 @@ async def process_pin_verification(update: Update, context: CallbackContext):
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=verification_message_id,
-                text=f"❌ Incorrect PIN. Please try again. ({pin_verification_attempts[user_id]}/{MAX_PIN_ATTEMPTS} attempts)\n\n"
+                text="❌ Incorrect PIN. Please try again.\n\n"
                      "Reply to this message with your PIN."
             )
 
