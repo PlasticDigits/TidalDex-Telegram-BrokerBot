@@ -20,9 +20,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/wallet - Show all wallets and active wallet info\n"
         "/wallets - List all wallets and switch between them\n"
         "/addwallet - Add a new wallet (create or import)\n"
+        "/rename_wallet - Rename your currently active wallet\n"
         "/backup - Backup your active wallet's seed phrase\n"
         "/export_key - Export private key of your active wallet\n"
         "/recover - Recover a wallet using a private key\n\n"
+        
+        "Security:\n"
+        "/set_pin - Set or change your security PIN\n\n"
         
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"
@@ -35,7 +39,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/cancel - Cancel the current operation\n\n"
         
         "Security Tips:\n"
-        "• Never share your private keys with anyone\n"
+        "• Never share your private keys or seed phrases\n"
+        "• Set a PIN for additional security\n"
         "• Always backup your wallet private keys\n"
         "• Double-check addresses when sending funds\n"
         "• This bot encrypts your private keys but still use at your own risk"
@@ -57,9 +62,13 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "/wallet - Show all wallets and active wallet info\n"
         "/wallets - List all wallets and switch between them\n"
         "/addwallet - Add a new wallet (create or import)\n"
+        "/rename_wallet - Rename your currently active wallet\n"
         "/backup - Backup your active wallet's seed phrase\n"
         "/export_key - Export private key of your active wallet\n"
         "/recover - Recover a wallet using a private key\n\n"
+        
+        "Security:\n"
+        "/set_pin - Set or change your security PIN\n\n"
         
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"

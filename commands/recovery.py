@@ -252,8 +252,12 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "⚠️ IMPORTANT: Store this seed phrase securely! Anyone with access to it can control your wallet."
         )
         
+        # Send seed phrase with enhanced security
+        # The user will first see a warning and must click to reveal the sensitive information
+        # They can also click "Delete Now" to immediately destroy the message
         await send_self_destructing_message(
             update,
+            context,
             message_text,
             parse_mode='Markdown'
         )
@@ -266,8 +270,12 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "⚠️ IMPORTANT: Store this private key securely! Anyone with access to it can control your wallet."
         )
         
+        # Send private key with enhanced security
+        # The user will first see a warning and must click to reveal the sensitive information
+        # They can also click "Delete Now" to immediately destroy the message
         await send_self_destructing_message(
             update,
+            context,
             message_text,
             parse_mode='Markdown'
         )

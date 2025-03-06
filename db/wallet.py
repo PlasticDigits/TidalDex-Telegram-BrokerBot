@@ -279,4 +279,81 @@ def set_active_wallet(user_id, wallet_name):
     except Exception as e:
         logger.error(f"Error setting active wallet for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
-        return False 
+        return False
+
+def rename_wallet(user_id, new_name):
+    """
+    Rename the currently active wallet for a user.
+    
+    Args:
+        user_id: The user ID
+        new_name (str): The new name for the wallet
+        
+    Returns:
+        bool: True if successful, False otherwise
+        str: The old name of the wallet or error message if False
+    """
+    # Hash the user ID for database operations
+    user_id_str = hash_user_id(user_id)
+    logger.debug(f"Renaming active wallet for hashed user_id: {user_id_str}")
+    
+    # Basic length validation
+    if not new_name:
+        return False, "Invalid wallet name. Name cannot be empty."
+    
+    if len(new_name) > 32:
+        return False, "Invalid wallet name. Name must not exceed 32 characters."
+    
+    if len(new_name) < 3:
+        return False, "Invalid wallet name. Name must be at least 3 characters long."
+    
+    # Check for leading/trailing whitespace
+    if new_name != new_name.strip():
+        return False, "Wallet name cannot have leading or trailing spaces."
+        
+    # Check for dangerous characters (SQL injection, command execution)
+    import re
+    if re.search(r'[\'";`<>]', new_name):
+        return False, "Wallet name contains invalid characters. Avoid using: ' \" ; ` < >"
+    
+    # Check against reserved names
+    reserved_names = ["default", "wallet", "main", "primary", "backup", "test", "admin", "system"]
+    if new_name.lower() in reserved_names:
+        return False, f"'{new_name}' is a reserved name and cannot be used."
+    
+    try:
+        # Check if wallet with new name already exists
+        existing = execute_query(
+            "SELECT id FROM wallets WHERE user_id = ? AND name = ?", 
+            (user_id_str, new_name),
+            fetch='one'
+        )
+        
+        if existing:
+            return False, f"Wallet with name '{new_name}' already exists."
+        
+        # Get active wallet
+        active_wallet = execute_query(
+            "SELECT id, name FROM wallets WHERE user_id = ? AND is_active = 1", 
+            (user_id_str,),
+            fetch='one'
+        )
+        
+        if not active_wallet:
+            return False, "No active wallet found."
+        
+        old_name = active_wallet['name']
+        
+        # Update the wallet name
+        execute_query(
+            "UPDATE wallets SET name = ? WHERE id = ?",
+            (new_name, active_wallet['id'])
+        )
+        
+        # Enhanced logging for security audit
+        logger.info(f"Wallet renamed from '{old_name}' to '{new_name}' for user ID hash: {user_id_str[:10]}...")
+        return True, old_name
+    except Exception as e:
+        logger.error(f"Error renaming wallet for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False, str(e) 

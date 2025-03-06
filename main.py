@@ -8,6 +8,11 @@ import traceback
 # Import custom modules
 from utils.chat import create_private_chat_wrapper
 from utils.config import TELEGRAM_BOT_TOKEN
+from utils.message_security import (
+    show_sensitive_information, delete_sensitive_information,
+    verify_pin_callback, process_pin_verification,
+    SHOW_SENSITIVE_INFO, DELETE_NOW, VERIFY_PIN
+)
 # Import restructured database module
 import db
 
@@ -37,6 +42,13 @@ from commands.addwallet import (
     CHOOSING_ACTION as ADD_CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY
 )
 from commands.export_key import export_key_command
+from commands.rename_wallet import (
+    rename_wallet_command, process_new_name, WAITING_FOR_NAME
+)
+from commands.set_pin import (
+    set_pin_command, process_pin, confirm_pin, process_current_pin,
+    ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN
+)
 
 # Configure logging
 logging.basicConfig(
@@ -100,6 +112,8 @@ def main() -> None:
     wallets_wrapper = create_private_chat_wrapper(wallets_command)
     addwallet_wrapper = create_private_chat_wrapper(addwallet_command)
     export_key_wrapper = create_private_chat_wrapper(export_key_command)
+    set_pin_wrapper = create_private_chat_wrapper(set_pin_command)
+    rename_wallet_wrapper = create_private_chat_wrapper(rename_wallet_command)
 
     # Add command handlers with the private chat wrappers
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -160,10 +174,54 @@ def main() -> None:
         per_message=False,
     )
     
+    # Add conversation handler for renaming wallet
+    rename_wallet_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("rename_wallet", rename_wallet_wrapper)],
+        states={
+            WAITING_FOR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
+    
+    # Add conversation handler for setting PIN
+    set_pin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("set_pin", set_pin_wrapper)],
+        states={
+            ENTERING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_pin)],
+            CONFIRMING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_pin)],
+            ENTERING_CURRENT_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_current_pin)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
+    
     application.add_handler(send_conv_handler)
     application.add_handler(recover_conv_handler)
     application.add_handler(wallets_conv_handler)
     application.add_handler(addwallet_conv_handler)
+    application.add_handler(rename_wallet_conv_handler)
+    application.add_handler(set_pin_conv_handler)
+    
+    # Add handlers for sensitive message buttons
+    application.add_handler(CallbackQueryHandler(
+        show_sensitive_information, 
+        pattern=f"^{SHOW_SENSITIVE_INFO}"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        delete_sensitive_information, 
+        pattern=f"^{DELETE_NOW}"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        verify_pin_callback, 
+        pattern=f"^{VERIFY_PIN}"
+    ))
+    
+    # Add handler for PIN verification
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.REPLY,
+        process_pin_verification
+    ))
     
     # Add error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

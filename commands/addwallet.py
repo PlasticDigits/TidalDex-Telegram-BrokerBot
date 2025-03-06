@@ -4,6 +4,7 @@ import db
 import wallet
 import logging
 import traceback
+import re
 from wallet.mnemonic import derive_wallet_from_mnemonic
 from utils.message_security import send_self_destructing_message
 
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY = range(3)
+
+# Input validation constants
+MAX_WALLET_NAME_LENGTH = 32
+MIN_WALLET_NAME_LENGTH = 3
+MAX_PRIVATE_KEY_LENGTH = 130  # Private keys are 64 hex chars, plus optional '0x' prefix, allow some buffer
 
 # Store temporary data during conversation
 user_temp_data = {}
@@ -42,7 +48,13 @@ async def action_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
     # Initialize user temp data
     user_temp_data[user_id] = {'action': choice}
     
-    await query.edit_message_text("Please enter a name for this wallet:")
+    await query.edit_message_text(
+        "Please enter a name for this wallet:\n\n"
+        f"• Names must be {MIN_WALLET_NAME_LENGTH}-{MAX_WALLET_NAME_LENGTH} characters long\n"
+        "• Letters, numbers, spaces, and emoji are allowed\n"
+        "• Names cannot start or end with spaces\n"
+        "• Special characters like \" ' < > ` ; are not allowed"
+    )
     
     return ENTERING_NAME
 
@@ -56,9 +68,33 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Something went wrong. Please try again with /addwallet.")
         return ConversationHandler.END
     
-    # Check if name is valid
-    if not wallet_name or len(wallet_name) > 32:
-        await update.message.reply_text("Wallet name must be between 1 and 32 characters. Please try again:")
+    # Length validation
+    if not wallet_name:
+        await update.message.reply_text("Wallet name cannot be empty. Please enter a name:")
+        return ENTERING_NAME
+        
+    if len(wallet_name) > MAX_WALLET_NAME_LENGTH:
+        await update.message.reply_text(f"Wallet name is too long. Maximum length is {MAX_WALLET_NAME_LENGTH} characters. Please try again:")
+        return ENTERING_NAME
+        
+    if len(wallet_name) < MIN_WALLET_NAME_LENGTH:
+        await update.message.reply_text(f"Wallet name is too short. Minimum length is {MIN_WALLET_NAME_LENGTH} characters. Please try again:")
+        return ENTERING_NAME
+    
+    # Check for dangerous characters
+    if re.search(r'[\'";`<>]', wallet_name):
+        await update.message.reply_text("Wallet name contains invalid characters. Please avoid using: ' \" ; ` < >")
+        return ENTERING_NAME
+        
+    # Check for leading/trailing whitespace (the strip above removes it, but we should tell the user)
+    if wallet_name != update.message.text:
+        await update.message.reply_text("Wallet name cannot have leading or trailing spaces. Please try again:")
+        return ENTERING_NAME
+    
+    # Check for reserved names
+    reserved_names = ["default", "wallet", "main", "primary", "backup", "test", "admin", "system"]
+    if wallet_name.lower() in reserved_names:
+        await update.message.reply_text(f"'{wallet_name}' is a reserved name and cannot be used. Please choose a different name:")
         return ENTERING_NAME
     
     # Check if wallet with this name already exists
@@ -98,6 +134,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 db.save_user_wallet(user_id, wallet_to_save, wallet_name)
                 
                 # Normal message since no seed phrase is shown
+                # Do not need to show path, since we are using the standard BSC/ETH path
                 await update.message.reply_text(
                     f"🎉 New wallet '{wallet_name}' created from your existing seed phrase!\n\n"
                     f"Address: `{new_wallet['address']}`\n\n"
@@ -126,6 +163,8 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 db.save_user_mnemonic(user_id, mnemonic)
                 
                 # Send self-destructing message with seed phrase
+                # Note: This will first show a security warning with a button
+                # that the user must click to see the sensitive information
                 message_text = (
                     f"🎉 New wallet '{wallet_name}' created with new seed phrase!\n\n"
                     f"Address: `{new_wallet['address']}`\n\n"
@@ -137,6 +176,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 await send_self_destructing_message(
                     update,
+                    context,
                     message_text,
                     parse_mode='Markdown'
                 )
@@ -155,6 +195,8 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Import wallet from private key
         await update.message.reply_text(
             "Please enter the private key for this wallet:\n\n"
+            "• Private keys are typically 64 characters (hexadecimal)\n"
+            "• The '0x' prefix is optional\n\n"
             "⚠️ WARNING: Never share your private keys with anyone!"
         )
         return ENTERING_PRIVATE_KEY
@@ -163,6 +205,19 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Process the private key for wallet import."""
     user_id = update.effective_user.id
     private_key = update.message.text.strip()
+    
+    # Input size validation for private key
+    if len(private_key) > MAX_PRIVATE_KEY_LENGTH:
+        # Create a secure response with no sensitive data
+        await update.message.reply_text(
+            f"❌ Private key too long. Please enter a valid private key (max {MAX_PRIVATE_KEY_LENGTH} characters)."
+        )
+        # Try to delete the original message which contains the too-long key
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.warning(f"Could not delete message with invalid private key: {e}")
+        return ENTERING_PRIVATE_KEY
     
     # Delete the message with private key for security
     try:
@@ -176,6 +231,17 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
     
     wallet_name = user_temp_data[user_id]['wallet_name']
+    
+    # Basic format validation
+    if not re.match(r'^(0x)?[0-9a-fA-F]{64}$', private_key):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Invalid private key format. Private keys must be 64 hexadecimal characters with an optional '0x' prefix.\n\n"
+                 "Please try again with /addwallet."
+        )
+        # Clean up temp data
+        del user_temp_data[user_id]
+        return ConversationHandler.END
     
     try:
         # Validate and import the private key
@@ -207,7 +273,7 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Error importing wallet: {e}")
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"❌ Error importing wallet: Invalid private key format. Please try again with /addwallet."
+            text=f"❌ Error importing wallet: Invalid private key. Please try again with /addwallet."
         )
     
     # Clean up temp data

@@ -234,6 +234,7 @@ def init_db():
                 username TEXT,
                 first_name TEXT,
                 last_name TEXT,
+                pin_hash TEXT,
                 account_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 settings TEXT
             );

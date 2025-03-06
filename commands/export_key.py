@@ -55,8 +55,13 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "will have different private keys."
         )
         
+        # Send the private key with enhanced security
+        # Note: This will first show a security warning with a button that the user must click
+        # to see the sensitive information. User can also click "Delete Now" to immediately 
+        # destroy the message instead of waiting for the countdown.
         await send_self_destructing_message(
             update,
+            context,
             message_text,
             parse_mode='Markdown'
         )

@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 # Conversation states
 CHOOSING_ACTION, SEND_BNB_AMOUNT, SEND_BNB_ADDRESS, SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS = range(6)
 
+# Constants for input validation
+MAX_ADDRESS_LENGTH = 100  # Ethereum addresses are 42 chars with 0x prefix
+MAX_AMOUNT_LENGTH = 30    # Financial amounts shouldn't need more than this
+MAX_SYMBOL_LENGTH = 20    # Token symbols are typically short
+
 async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the send process."""
     user_id = update.effective_user.id
@@ -99,6 +104,14 @@ async def send_bnb_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Process BNB amount and ask for recipient address."""
     input_text = update.message.text.strip()
     
+    # Input size limiting
+    if len(input_text) > MAX_AMOUNT_LENGTH:
+        await update.message.reply_text(
+            f"❌ Input too long. Please enter an amount with fewer than {MAX_AMOUNT_LENGTH} characters.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
+        return SEND_BNB_AMOUNT
+    
     # Check if user wants to cancel
     if input_text.lower() == "/cancel":
         await update.message.reply_text("Transaction cancelled.")
@@ -138,6 +151,14 @@ async def send_bnb_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process recipient address and send BNB with status updates."""
     recipient_address = update.message.text.strip()
+    
+    # Input size limiting
+    if len(recipient_address) > MAX_ADDRESS_LENGTH:
+        await update.message.reply_text(
+            f"❌ Address too long. Please enter an address with fewer than {MAX_ADDRESS_LENGTH} characters.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
+        return SEND_BNB_ADDRESS
     
     # Check if user wants to cancel
     if recipient_address.lower() == "/cancel":
@@ -279,6 +300,14 @@ async def send_token_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Process token symbol and ask for amount."""
     symbol = update.message.text.strip().upper()
     
+    # Input size limiting
+    if len(symbol) > MAX_SYMBOL_LENGTH:
+        await update.message.reply_text(
+            f"❌ Symbol too long. Please enter a symbol with fewer than {MAX_SYMBOL_LENGTH} characters.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
+        return SEND_TOKEN_SYMBOL
+    
     # Check if user wants to cancel
     if symbol.lower() == "/cancel":
         await update.message.reply_text("Transaction cancelled.")
@@ -306,6 +335,14 @@ async def send_token_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def send_token_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process token amount and ask for recipient address."""
     input_text = update.message.text.strip()
+    
+    # Input size limiting
+    if len(input_text) > MAX_AMOUNT_LENGTH:
+        await update.message.reply_text(
+            f"❌ Input too long. Please enter an amount with fewer than {MAX_AMOUNT_LENGTH} characters.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
+        return SEND_TOKEN_AMOUNT
     
     # Check if user wants to cancel
     if input_text.lower() == "/cancel":
@@ -336,6 +373,14 @@ async def send_token_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process recipient address and send token with status updates."""
     recipient_address = update.message.text.strip()
+    
+    # Input size limiting
+    if len(recipient_address) > MAX_ADDRESS_LENGTH:
+        await update.message.reply_text(
+            f"❌ Address too long. Please enter an address with fewer than {MAX_ADDRESS_LENGTH} characters.\n\n"
+            "Type /cancel to cancel the transaction."
+        )
+        return SEND_TOKEN_ADDRESS
     
     # Check if user wants to cancel
     if recipient_address.lower() == "/cancel":
