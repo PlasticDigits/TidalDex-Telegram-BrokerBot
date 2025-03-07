@@ -34,7 +34,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/recover - Recover a wallet using a private key\n\n"
         
         "Security:\n"
-        "/set_pin - Set or change your security PIN\n\n"
+        "/set_pin - Set or change your security PIN\n"
+        "/lock - Lock your wallet (clear cached PIN)\n\n"
         
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"
@@ -49,6 +50,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Security Tips:\n"
         "• Never share your private keys or seed phrases\n"
         "• Set a PIN for additional security\n"
+        "• Use /lock when you're done to secure your wallet\n"
         "• Always backup your wallet private keys\n"
         "• Double-check addresses when sending funds\n"
         "• This bot encrypts your private keys but still use at your own risk"
@@ -76,7 +78,8 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "/recover - Recover a wallet using a private key\n\n"
         
         "Security:\n"
-        "/set_pin - Set or change your security PIN\n\n"
+        "/set_pin - Set or change your security PIN\n"
+        "/lock - Lock your wallet (clear cached PIN)\n\n"
         
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"

@@ -28,6 +28,9 @@ BSC_RPC_URL = get_env_var('BSC_RPC_URL')
 TELEGRAM_BOT_TOKEN = get_env_var('TELEGRAM_BOT_TOKEN')
 ENCRYPTION_KEY = get_env_var('ENCRYPTION_KEY')
 
+# PIN security settings
+PIN_EXPIRATION_TIME = int(get_env_var('PIN_EXPIRATION_TIME', 1800))  # Default: 30 minutes (in seconds)
+
 # Wallet derivation path settings
 DEFAULT_DERIVATION_PATH = "m/44'/60'/0'/0/0"  # Default path for first Ethereum account
 ACCOUNT_PATH_TEMPLATE = "m/44'/60'/0'/0/{}"   # Template for deriving multiple accounts

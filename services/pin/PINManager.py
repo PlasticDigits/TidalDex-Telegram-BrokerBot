@@ -19,6 +19,7 @@ from db.pin import has_pin, verify_pin as db_verify_pin, save_user_pin
 from db.mnemonic import get_user_mnemonic, save_user_mnemonic
 from db.wallet import get_user_wallets_with_keys, save_user_wallet
 from db.utils import hash_user_id
+from utils.config import PIN_EXPIRATION_TIME
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ class PINManager:
     
     def _initialize(self):
         """Initialize the PINManager instance."""
-        self._pin_store = {}  # {user_id: {"pin": str, "timestamp": float}}
-        self._expiration_time = 30 * 60  # 30 minutes by default
+        self._pin_store = {}  # {user_id: {"pin": str, "timestamp": float, "expiration": int}}
+        self._expiration_time = PIN_EXPIRATION_TIME  # Load from config
+        logger.info(f"PINManager initialized with expiration time: {self._expiration_time} seconds")
         self._start_cleanup_thread()
         logger.debug("PINManager initialized")
     
@@ -102,13 +104,13 @@ class PINManager:
         if valid:
             logger.info(f"PIN verified successfully for user {user_id_str}")
             # Store the verified PIN
-            self.store_pin(user_id, pin)
+            self._store_pin(user_id, pin)
             return True
         else:
             logger.warning(f"Invalid PIN provided for user {user_id_str}")
             return False
     
-    def store_pin(self, user_id, pin, expiration_time=None):
+    def _store_pin(self, user_id, pin, expiration_time=None):
         """
         Store a verified PIN for future use.
         
@@ -160,7 +162,7 @@ class PINManager:
                 save_user_wallet(user_id, wallet, wallet_name, pin)
             
             # Store the PIN in the PIN manager
-            self.store_pin(user_id, pin)
+            self._store_pin(user_id, pin)
             
             return True, None
         except Exception as e:

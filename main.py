@@ -33,6 +33,7 @@ from commands.send import (
     SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS,
     pin_protected_send
 )
+from commands.lock import lock_command
 from commands.cancel import cancel
 from commands.recovery import (
     recovery_choice_callback, process_private_key, 
@@ -122,6 +123,7 @@ def main() -> None:
     export_key_wrapper = create_private_chat_wrapper(pin_protected_export_key)
     set_pin_wrapper = create_private_chat_wrapper(set_pin_command)
     rename_wallet_wrapper = create_private_chat_wrapper(rename_wallet_command)
+    lock_wrapper = create_private_chat_wrapper(lock_command)
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -134,6 +136,7 @@ def main() -> None:
     application.add_handler(CommandHandler("backup", backup_wrapper))
     application.add_handler(CommandHandler("export_key", export_key_wrapper))
     application.add_handler(CommandHandler("rename", rename_wallet_wrapper))
+    application.add_handler(CommandHandler("lock", lock_wrapper))
     
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
