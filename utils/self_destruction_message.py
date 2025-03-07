@@ -13,9 +13,17 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
-# Callback data prefixes for buttons
+# Callback data prefixes for buttons - MUST MATCH EXACTLY in all functions
 SHOW_SENSITIVE_INFO = "show_sensitive_info:"
 DELETE_NOW = "delete_sensitive_info:"
+
+# Define a function to create the delete button to ensure consistency
+def create_delete_button(message_id, countdown=None):
+    """Create a standardized delete button with consistent callback data format"""
+    button_text = "🗑️ Delete Now" if countdown is None else f"🗑️ Delete Now ({countdown}s)"
+    callback_data = f"{DELETE_NOW}{message_id}"
+    logger.debug(f"Creating delete button with callback data: '{callback_data}'")
+    return InlineKeyboardButton(button_text, callback_data=callback_data)
 
 async def send_self_destructing_message(update: Update, context: CallbackContext, text: str, parse_mode: str = None, countdown_seconds: int = 10):
     """
@@ -38,7 +46,6 @@ async def send_self_destructing_message(update: Update, context: CallbackContext
         # Use a timestamp to make it unique
         import time
         message_id = str(int(time.time()))
-        user_id = update.effective_user.id
         
         # Initialize the sensitive_messages dict if it doesn't exist
         if 'sensitive_messages' not in context.user_data:
@@ -58,7 +65,7 @@ async def send_self_destructing_message(update: Update, context: CallbackContext
                 InlineKeyboardButton("📄 Show Information", callback_data=f"{SHOW_SENSITIVE_INFO}{message_id}")
             ],
             [
-                InlineKeyboardButton("❌ Delete", callback_data=f"{DELETE_NOW}{message_id}")
+                create_delete_button(message_id)
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -116,19 +123,10 @@ async def show_sensitive_information_with_id(update: Update, context: CallbackCo
     parse_mode = sensitive_data.get("parse_mode")
     countdown_seconds = sensitive_data.get("countdown_seconds", 10)
     
-    # Create button for immediate deletion
-    keyboard = [
-        [
-            InlineKeyboardButton("🗑️ Delete Now", callback_data=f"{DELETE_NOW}{message_id}")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     # Edit the message to show the sensitive information
     try:
         message = await query.edit_message_text(
             text,
-            reply_markup=reply_markup,
             parse_mode=parse_mode
         )
         
@@ -175,54 +173,51 @@ async def delete_sensitive_information(update: Update, context: CallbackContext)
     query = update.callback_query
     data = query.data
     
+    logger.info(f"delete_sensitive_information called with data: '{data}'")
+    
     # Extract the message ID from the callback data
-    if data.startswith(DELETE_NOW):
-        message_id = data[len(DELETE_NOW):]
+    if not data.startswith(DELETE_NOW):
+        logger.warning(f"Callback data does not start with DELETE_NOW prefix: '{data}'")
+        return
         
-        # Acknowledge the callback query first
-        await query.answer("Deleting message...")
+    message_id = data[len(DELETE_NOW):]
+    logger.info(f"Extracted message_id: '{message_id}' from callback data")
+    
+    # Always acknowledge the callback query to provide user feedback
+    await query.answer("Message deleted successfully")
+    
+    # Clean up stored data regardless of whether we can delete the message or not
+    # This prevents duplicated deletion attempts
+    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
+        # Remove from context before attempting deletion to prevent race conditions
+        context.user_data['sensitive_messages'].pop(message_id, None)
+        logger.info(f"Cleaned up sensitive message data for message {message_id}")
+    else:
+        # Message data already removed (likely already deleted by countdown)
+        logger.info(f"Message {message_id} already cleaned up, possibly deleted by countdown")
+        return
+    
+    # Try to delete the message that contains the button
+    try:
+        # Get message and chat info
+        chat_id = update.effective_chat.id
+        current_message_id = query.message.message_id
         
-        # Delete the message
-        try:
-            # First check if this is a warning message or a displayed sensitive information message
-            if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
-                message_data = context.user_data['sensitive_messages'][message_id]
-                
-                # If it's a warning message, delete it
-                if "warning_message_id" in message_data:
-                    await query.delete_message()
-                    logger.debug(f"Warning message {message_id} deleted by user request")
-                
-                # If sensitive info is displayed, delete that message too
-                if "sensitive_message_id" in message_data:
-                    try:
-                        # Get the chat ID and message ID
-                        chat_id = update.effective_chat.id
-                        sensitive_message_id = message_data["sensitive_message_id"]
-                        
-                        # Delete the sensitive message
-                        await context.bot.delete_message(chat_id=chat_id, message_id=sensitive_message_id)
-                        logger.debug(f"Sensitive information message {sensitive_message_id} deleted by user request")
-                    except TelegramError as e:
-                        logger.error(f"Error deleting sensitive information message: {e}")
-            else:
-                # Just delete the current message if we can't find it in the context
-                await query.delete_message()
-                logger.debug(f"Message deleted by user request (not found in context)")
-                
-        except TelegramError as e:
-            logger.error(f"Error deleting sensitive message: {e}")
+        # Try to delete the message
+        await context.bot.delete_message(chat_id=chat_id, message_id=current_message_id)
+        logger.info(f"Successfully deleted message {current_message_id} by user request")
+    except Exception as e:
+        # Message might have already been deleted by the countdown
+        if "Message to delete not found" in str(e):
+            logger.info(f"Message {current_message_id} was already deleted (likely by countdown)")
+        else:
+            logger.error(f"Error deleting message {current_message_id}: {e}")
+            # Only try to edit the message if it's not a "not found" error
             try:
-                await query.edit_message_text(
-                    "✅ Information deleted."
-                )
-            except:
-                pass
-        
-        # Clean up stored data
-        if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
-            del context.user_data['sensitive_messages'][message_id]
-            logger.debug(f"Cleaned up sensitive message data for message {message_id}")
+                await query.edit_message_text("✅ Information deleted.")
+                logger.info(f"Edited message {current_message_id} as fallback")
+            except Exception as edit_error:
+                logger.error(f"Failed to edit message: {edit_error}")
 
 async def run_countdown(update: Update, context: CallbackContext, message_id: str, message: Message, text: str, parse_mode: str, countdown_seconds: int):
     """
@@ -237,60 +232,71 @@ async def run_countdown(update: Update, context: CallbackContext, message_id: st
         parse_mode: The parse mode for the message
         countdown_seconds: The number of seconds for the countdown
     """
-    countdown_complete = False
-    delete_failed = False
+    chat_id = update.effective_chat.id
+    current_message_id = message.message_id
     
     # Run the countdown
     for i in range(countdown_seconds, 0, -1):
         # Check if message was already deleted by user
         if 'sensitive_messages' not in context.user_data or message_id not in context.user_data['sensitive_messages']:
-            logger.debug(f"Message {message_id} already deleted, aborting countdown")
+            logger.info(f"Message {message_id} already deleted by user, aborting countdown")
             return
             
-        # Only update the countdown every 5 seconds to avoid rate limits
-        if i <= 5 or i % 5 == 0:
-            # Create button for immediate deletion
-            keyboard = [
-                [
-                    InlineKeyboardButton(f"🗑️ Delete Now ({i}s)", callback_data=f"{DELETE_NOW}{message_id}")
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+        # Only update once per second
+        if i <= countdown_seconds:
+            # Update the message with just the countdown text in footer
+            footer_text = f"\n\n⏱️ Auto-deletes in {i} seconds..."
             
             try:
-                # Try to update the message with the countdown
-                await message.edit_reply_markup(reply_markup)
-            except TelegramError as e:
-                logger.warning(f"Failed to update countdown: {e}")
-                # Don't break the countdown if we fail to update the button
-        
+                # Try to update the message text with countdown
+                await message.edit_text(
+                    text + footer_text,
+                    parse_mode=parse_mode
+                )
+            except Exception as e:
+                if "Message to edit not found" in str(e):
+                    logger.info(f"Message {current_message_id} was already deleted manually, aborting countdown")
+                    
+                    # Clean up stored data if it hasn't been cleaned already
+                    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
+                        context.user_data['sensitive_messages'].pop(message_id, None)
+                        logger.info(f"Cleaned up sensitive message data for already deleted message {message_id}")
+                    return
+                else:
+                    logger.warning(f"Failed to update countdown: {e}")
+            
         # Wait 1 second
         await asyncio.sleep(1)
-    
-    # Countdown complete, delete the message
-    try:
-        await message.delete()
-        countdown_complete = True
-        logger.debug(f"Deleted sensitive message {message_id} after countdown")
-    except TelegramError as e:
-        logger.error(f"Failed to delete sensitive message: {e}")
-        delete_failed = True
-    
-    # Clean up stored data
-    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
-        del context.user_data['sensitive_messages'][message_id]
-        logger.debug(f"Cleaned up sensitive message data for message {message_id}")
-    
-    # If we couldn't delete, try to edit the message
-    if delete_failed:
-        try:
-            await message.edit_text(
-                "✅ This information has expired and been deleted.",
-                reply_markup=None
-            )
-        except:
-            pass
         
+    # Before trying to delete, check if the message was already deleted manually
+    if 'sensitive_messages' not in context.user_data or message_id not in context.user_data['sensitive_messages']:
+        logger.info(f"Message {message_id} already deleted by user, no need to auto-delete")
+        return
+    
+    # Countdown complete, now delete the message
+    try:
+        # Try to delete using the bot and chat_id/message_id
+        await context.bot.delete_message(chat_id=chat_id, message_id=current_message_id)
+        logger.info(f"Deleted sensitive message {message_id} after countdown")
+    except Exception as e:
+        if "Message to delete not found" in str(e):
+            logger.info(f"Message {current_message_id} was already deleted manually")
+        else:
+            logger.error(f"Failed to delete sensitive message: {e}")
+            # Only try to edit if not a "not found" error
+            try:
+                await message.edit_text(
+                    "✅ This information has expired and been deleted.",
+                    parse_mode=None
+                )
+            except Exception as edit_error:
+                logger.error(f"Failed to edit message after deletion failed: {edit_error}")
+    
+    # Clean up stored data if it hasn't been cleaned already
+    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
+        context.user_data['sensitive_messages'].pop(message_id, None)
+        logger.info(f"Cleaned up sensitive message data for message {message_id} after countdown")
+
 # Register these handlers in main.py:
 """
 # Add handlers for sensitive information buttons

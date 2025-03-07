@@ -1,6 +1,8 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 import db
+from db.wallet import get_active_wallet_name
+from services.pin import pin_manager
 import logging
 import traceback
 
@@ -10,7 +12,13 @@ logger = logging.getLogger(__name__)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show help information."""
     user_id = update.effective_user.id
-    has_wallet = db.get_user_wallet(user_id) is not None
+    
+    # Get active wallet name and PIN
+    wallet_name = get_active_wallet_name(user_id)
+    pin = pin_manager.get_pin(user_id)
+    
+    # Check if the user has a wallet
+    has_wallet = db.get_user_wallet(user_id, wallet_name, pin) is not None
     
     # Use plain text without Markdown for safer rendering
     help_text = (

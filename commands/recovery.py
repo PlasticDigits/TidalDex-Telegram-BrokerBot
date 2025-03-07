@@ -5,15 +5,11 @@ Provides functionality to restore a wallet from a private key or mnemonic phrase
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
-from db.wallet import get_user_wallet, save_user_wallet
-from db.mnemonic import get_user_mnemonic, save_user_mnemonic
-from db.utils import hash_user_id
+from db.wallet import get_user_wallet, save_user_wallet, get_user_wallets, get_active_wallet_name
+from db.mnemonic import save_user_mnemonic
 import wallet
 from eth_account import Account
 import logging
-from utils.config import DEFAULT_DERIVATION_PATH
-from utils.self_destruction_message import send_self_destructing_message
-import traceback
 from services.pin import require_pin, pin_manager
 
 # Enable logging
@@ -29,11 +25,15 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Start the wallet recovery process by asking for recovery method."""
     user_id = update.effective_user.id
     
+    # Get active wallet name and PIN
+    wallet_name = get_active_wallet_name(user_id)
+    pin = pin_manager.get_pin(user_id)
+    
     # Initialize user temp data
     user_temp_data[user_id] = {}
     
     # Check if user already has a wallet
-    user_wallet = get_user_wallet(user_id)
+    user_wallet = get_user_wallet(user_id, wallet_name, pin)
     warning_text = ""
     if user_wallet:
         warning_text = "⚠️ You already have a wallet. Recovering a different wallet will replace your current one.\n\n"
@@ -133,7 +133,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ENTERING_WALLET_NAME
     
     # Check if wallet with this name already exists
-    existing_wallets = get_user_wallets(user_id)
+    existing_wallets = get_user_wallets(user_id, pin_manager.get_pin(user_id))
     if wallet_name in existing_wallets:
         await update.message.reply_text(f"A wallet with name '{wallet_name}' already exists. Please choose a different name:")
         return ENTERING_WALLET_NAME
@@ -231,105 +231,6 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
             del user_temp_data[user_id]
     
     return ConversationHandler.END
-
-async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show the user their wallet's backup information (private key or mnemonic)."""
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
-    logger.debug(f"Backup command called by user {user_id_str}")
-    
-    # Check if user has a wallet first
-    user_wallet = get_user_wallet(user_id)
-    
-    if not user_wallet:
-        await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
-        return
-    
-    # Get PIN from PINManager
-    pin = pin_manager.get_pin(user_id)
-    
-    # Try to get the mnemonic first
-    mnemonic = None
-    try:
-        logger.debug(f"Attempting to get mnemonic with PIN: {pin is not None}")
-        mnemonic = get_user_mnemonic(user_id, pin)
-        if mnemonic:
-            logger.debug(f"Successfully retrieved mnemonic for user {user_id_str}")
-        else:
-            logger.warning(f"Failed to retrieve mnemonic for user {user_id_str}")
-    except Exception as e:
-        logger.error(f"Error retrieving mnemonic: {e}")
-        logger.error(traceback.format_exc())
-    
-    # If we couldn't get a mnemonic, try to get the wallet's private key instead
-    if not mnemonic:
-        logger.debug(f"No mnemonic found, trying to get wallet private key")
-        try:
-            # Ensure we have the wallet with PIN
-            user_wallet = get_user_wallet(user_id, pin=pin)
-            
-            if not user_wallet or not user_wallet.get('private_key'):
-                await update.message.reply_text(
-                    "❌ Failed to retrieve your backup information. Please try again later."
-                )
-                return
-                
-            # Send the private key
-            private_key = user_wallet.get('private_key')
-            if private_key:
-                await send_self_destructing_message(
-                    update,
-                    context,
-                    "⚠️ *IMPORTANT SECURITY WARNING* ⚠️\n\n"
-                    "Below is your private key. It provides *FULL ACCESS* to your wallet funds.\n\n"
-                    "🔒 *NEVER* share this with anyone\n"
-                    "🔒 *NEVER* enter it on any website\n"
-                    "🔒 Store it in a secure, offline location\n\n"
-                    f"Your private key:\n`{private_key}`\n\n"
-                    "⚠️ *Screenshot and delete this message immediately* ⚠️",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                logger.info(f"Private key successfully displayed to user {user_id_str}")
-                return
-            else:
-                await update.message.reply_text(
-                    "❌ Failed to retrieve your private key. Please try again later."
-                )
-                return
-        except Exception as e:
-            logger.error(f"Error retrieving private key: {e}")
-            logger.error(traceback.format_exc())
-            await update.message.reply_text(
-                "❌ An error occurred while retrieving your backup information. Please try again later."
-            )
-            return
-    
-    # Send the mnemonic phrase
-    try:
-        await send_self_destructing_message(
-            update,
-            context,
-            "⚠️ *IMPORTANT SECURITY WARNING* ⚠️\n\n"
-            "Below is your recovery phrase. It provides *FULL ACCESS* to your wallet funds.\n\n"
-            "🔒 *NEVER* share this with anyone\n"
-            "🔒 *NEVER* enter it on any website\n"
-            "🔒 Store it in a secure, offline location\n\n"
-            f"Your recovery phrase:\n```\n{mnemonic}\n```\n\n"
-            "⚠️ *Screenshot and delete this message immediately* ⚠️",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        logger.info(f"Mnemonic phrase successfully displayed to user {user_id_str}")
-    except Exception as e:
-        logger.error(f"Error sending mnemonic: {e}")
-        logger.error(traceback.format_exc())
-        await update.message.reply_text(
-            "❌ An error occurred while displaying your recovery phrase. Please try again later."
-        )
-
-# Create a PIN-protected version of the command
-pin_protected_backup = require_pin(
-    "🔒 Your wallet recovery information requires PIN verification.\nPlease enter your PIN:"
-)(backup_command)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the current operation and end the conversation."""

@@ -4,6 +4,9 @@ Command for renaming the currently active wallet.
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import db
+from db.wallet import get_active_wallet_name
+from db.utils import hash_user_id
+from services.pin import pin_manager
 import logging
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -19,10 +22,15 @@ async def rename_wallet_command(update: Update, context: ContextTypes.DEFAULT_TY
     Start the process to rename the currently active wallet.
     """
     user_id = update.effective_user.id
-    logger.info(f"Rename wallet command called by user {user_id}")
+    user_id_str = hash_user_id(user_id)
+    logger.debug(f"Rename wallet command initiated by user {user_id_str}")
+    
+    # Get active wallet name and PIN
+    wallet_name = get_active_wallet_name(user_id)
+    pin = pin_manager.get_pin(user_id)
     
     # Check if user has a wallet
-    user_wallet = db.get_user_wallet(user_id)
+    user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
     
     if not user_wallet:
         await update.message.reply_text(

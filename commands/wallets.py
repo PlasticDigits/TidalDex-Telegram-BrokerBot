@@ -1,6 +1,8 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 import db
+from db.wallet import get_active_wallet_name
+from services.pin import pin_manager
 import logging
 
 # Enable logging
@@ -10,9 +12,14 @@ logger = logging.getLogger(__name__)
 SELECTING_WALLET = 0
 
 async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show available wallets and let the user select one."""
+    """Show list of wallets and allow switching between them."""
     user_id = update.effective_user.id
-    user_wallets = db.get_user_wallets(user_id)
+    
+    # Get PIN from pin_manager
+    pin = pin_manager.get_pin(user_id)
+    
+    # Get user wallets with PIN
+    user_wallets = db.get_user_wallets(user_id, pin)
     
     if not user_wallets:
         await update.message.reply_text(
@@ -41,22 +48,26 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
     query = update.callback_query
     await query.answer()
     
-    # Extract wallet name from callback data
-    wallet_name = query.data.split(':', 1)[1]
     user_id = update.effective_user.id
+    selected_wallet_name = query.data.split(':', 1)[1]
+    
+    # Get PIN from pin_manager
+    pin = pin_manager.get_pin(user_id)
     
     # Set the selected wallet as active
-    if db.set_active_wallet(user_id, wallet_name):
-        wallet = db.get_user_wallet(user_id)
-        await query.edit_message_text(
-            f"Switched to wallet: {wallet_name}\n"
-            f"Address: `{wallet['address']}`\n\n"
-            "Use /balance to check your balances\n"
-            "Use /send to send funds\n"
-            "Use /receive to get your address for receiving funds",
-            parse_mode='Markdown'
-        )
+    if db.set_active_wallet(user_id, selected_wallet_name):
+        # Get the newly activated wallet
+        wallet = db.get_user_wallet(user_id, selected_wallet_name, pin)
+        
+        if wallet:
+            await query.edit_message_text(
+                f"Switched to wallet: {selected_wallet_name}\n"
+                f"Address: `{wallet['address']}`",
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(f"Switched to wallet '{selected_wallet_name}' but could not retrieve wallet details.")
     else:
-        await query.edit_message_text(f"Error: Could not switch to wallet '{wallet_name}'. It may have been deleted.")
+        await query.edit_message_text(f"Error: Could not switch to wallet '{selected_wallet_name}'. It may have been deleted.")
     
     return ConversationHandler.END 

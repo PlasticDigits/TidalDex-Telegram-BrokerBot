@@ -204,7 +204,7 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                     "You'll need to enter this PIN for all sensitive operations from now on."
                 )
             else:
-                logger.error(f"Failed to set PIN for user {user_id_str}: {error}")
+                logger.error(f"Failed to set PIN for user {user_id_str}")
                 await update.message.reply_text(
                     f"❌ Failed to set PIN. Please try again later."
                 )

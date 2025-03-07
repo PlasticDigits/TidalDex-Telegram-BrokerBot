@@ -4,7 +4,7 @@ Balance checking module for BNB and BEP20 tokens.
 from utils.web3_connection import w3
 from utils.token_operations import get_token_contract, get_token_details
 
-def get_bnb_balance(address, status_callback=None):
+async def get_bnb_balance(address, status_callback=None):
     """
     Get BNB balance for an address.
     
@@ -16,26 +16,26 @@ def get_bnb_balance(address, status_callback=None):
         float: The BNB balance in ether
     """
     if status_callback:
-        status_callback("Converting address to checksum format...")
+        await status_callback("Converting address to checksum format...")
     
     # Convert to checksum address
     checksum_address = w3.to_checksum_address(address)
     
     if status_callback:
-        status_callback("Connecting to BSC network...")
+        await status_callback("Connecting to BSC network...")
     
     if status_callback:
-        status_callback("Fetching BNB balance...")
+        await status_callback("Fetching BNB balance...")
     
     balance_wei = w3.eth.get_balance(checksum_address)
     balance_bnb = w3.from_wei(balance_wei, 'ether')
     
     if status_callback:
-        status_callback(f"Balance retrieved: {balance_bnb} BNB")
+        await status_callback(f"Balance retrieved: {balance_bnb} BNB")
     
     return balance_bnb
 
-def get_token_balance(token_address, wallet_address, status_callback=None):
+async def get_token_balance(token_address, wallet_address, status_callback=None):
     """
     Get BEP20 token balance.
     
@@ -54,28 +54,28 @@ def get_token_balance(token_address, wallet_address, status_callback=None):
             }
     """
     if status_callback:
-        status_callback("Converting wallet address to checksum format...")
+        await status_callback("Converting wallet address to checksum format...")
     
     # Convert wallet address to checksum
     checksum_wallet_address = w3.to_checksum_address(wallet_address)
     
     # Get token contract
-    token_contract = get_token_contract(token_address, status_callback)
+    token_contract = get_token_contract(token_address)
     
     # Get token details
-    token_details = get_token_details(token_contract, status_callback)
+    token_details = await get_token_details(token_contract, status_callback)
     symbol = token_details['symbol']
     decimals = token_details['decimals']
     
     if status_callback:
-        status_callback(f"Fetching {symbol} balance...")
+        await status_callback(f"Fetching {symbol} balance...")
     
     # Get balance
     raw_balance = token_contract.functions.balanceOf(checksum_wallet_address).call()
     balance = raw_balance / (10 ** decimals)
     
     if status_callback:
-        status_callback(f"Balance retrieved: {balance} {symbol}")
+        await status_callback(f"Balance retrieved: {balance} {symbol}")
     
     return {
         'balance': balance,

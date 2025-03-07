@@ -6,18 +6,20 @@ import traceback
 from db.connection import execute_query
 from db.utils import encrypt_data, decrypt_data, hash_user_id
 from db.pin import has_pin
+from db.mnemonic import get_user_mnemonic
+from wallet.mnemonic import derive_wallet_from_mnemonic
 import time
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-def get_user_wallet(user_id, wallet_id=None, pin=None):
+def get_user_wallet(user_id, wallet_name=None, pin=None):
     """
     Get the active wallet for a specific user.
     
     Args:
         user_id: The user ID to get the wallet for
-        wallet_id: Optional wallet ID to retrieve a specific wallet
+        wallet_name: Optional wallet name to retrieve a specific wallet
         pin (str, optional): The PIN to use for decryption
         
     Returns:
@@ -27,12 +29,12 @@ def get_user_wallet(user_id, wallet_id=None, pin=None):
     user_id_str = hash_user_id(user_id)
     
     try:
-        # If wallet_id is provided, get that specific wallet
-        if wallet_id:
-            logger.debug(f"Querying specific wallet {wallet_id} for user: {user_id_str}")
+        # If wallet_name is provided, get that specific wallet
+        if wallet_name:
+            logger.debug(f"Querying specific wallet {wallet_name} for user: {user_id_str}")
             result = execute_query(
-                "SELECT * FROM wallets WHERE user_id = ? AND wallet_id = ?",
-                (user_id_str, wallet_id),
+                "SELECT * FROM wallets WHERE user_id = ? AND name = ?",
+                (user_id_str, wallet_name),
                 fetch='one'
             )
         else:
@@ -45,8 +47,8 @@ def get_user_wallet(user_id, wallet_id=None, pin=None):
             )
         
         if not result:
-            if wallet_id:
-                logger.debug(f"No wallet with ID {wallet_id} found for user: {user_id_str}")
+            if wallet_name:
+                logger.debug(f"No wallet with ID {wallet_name} found for user: {user_id_str}")
             else:
                 logger.debug(f"No active wallet found for user: {user_id_str}")
             return None
@@ -54,22 +56,33 @@ def get_user_wallet(user_id, wallet_id=None, pin=None):
         # Decrypt private key if present
         wallet_data = dict(result)
         if wallet_data.get('private_key'):
-            # Extract wallet_id safely with a default value if it doesn't exist
-            wallet_id_str = wallet_data.get('wallet_id', 'unknown')
-            logger.debug(f"Attempting to decrypt private key for wallet {wallet_id_str} for user {user_id_str}")
+            logger.debug(f"Attempting to decrypt private key for wallet {wallet_name} for user {user_id_str}")
             try:
                 private_key = decrypt_data(wallet_data['private_key'], user_id, pin)
                 if private_key:
                     wallet_data['private_key'] = private_key
-                    logger.debug(f"Successfully decrypted private key for wallet {wallet_id_str} for user {user_id_str}")
+                    logger.debug(f"Successfully decrypted private key for wallet {wallet_name} for user {user_id_str}")
                     
                 else:
-                    logger.error(f"Failed to decrypt private key for wallet {wallet_id_str} for user {user_id_str}")
+                    logger.error(f"Failed to decrypt private key for wallet {wallet_name} for user {user_id_str}")
             except Exception as e:
-                logger.error(f"Error decrypting private key for wallet {wallet_id_str} for user {user_id_str}: {e}")
+                logger.error(f"Error decrypting private key for wallet {wallet_name} for user {user_id_str}: {e}")
                 logger.error(traceback.format_exc())
                 wallet_data['private_key'] = None
-        
+        elif wallet_data.get('path'):
+            logger.debug(f"Wallet {wallet_name} has no private key, but has a path. It is a mnemonic wallet.")
+            try:
+                mnemonic = get_user_mnemonic(user_id, pin)
+                if mnemonic:
+                    wallet_data['private_key'] = derive_wallet_from_mnemonic(mnemonic, wallet_data['path'])
+                    logger.debug(f"Successfully derived private key for wallet {wallet_name} for user {user_id_str}")
+                else:
+                    logger.error(f"Failed to retrieve mnemonic for user {user_id_str}")
+            except Exception as e:
+                logger.error(f"Error deriving private key from mnemonicfor wallet {wallet_name} for user {user_id_str}: {e}")
+                logger.error(traceback.format_exc())
+                wallet_data['private_key'] = None
+                    
         return wallet_data
     except Exception as e:
         logger.error(f"Error retrieving wallet for user {user_id_str}: {e}")

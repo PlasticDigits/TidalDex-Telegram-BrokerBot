@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from db.utils import hash_user_id
 import db
+from db.wallet import get_active_wallet_name
 import logging
 import traceback
 from utils.self_destruction_message import send_self_destructing_message
@@ -26,8 +27,11 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Get PIN from PINManager
         pin = pin_manager.get_pin(user_id)
         
+        # Get the active wallet name
+        wallet_name = get_active_wallet_name(user_id)
+        
         # Get user wallet with PIN if available
-        user_wallet = db.get_user_wallet(user_id, pin=pin)
+        user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
         
         if not user_wallet:
             await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
@@ -45,7 +49,6 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # We have the private key, display it with security warnings
         private_key = user_wallet.get('private_key')
-        wallet_name = user_wallet.get('name', 'Default')
         address = user_wallet.get('address')
         
         # Use self-destructing message for security

@@ -6,6 +6,7 @@ from telegram.constants import ParseMode
 from db.mnemonic import get_user_mnemonic
 from db.utils import hash_user_id
 from services.pin import require_pin, pin_manager
+from utils.self_destruction_message import send_self_destructing_message
 import logging
 import traceback
 
@@ -39,7 +40,9 @@ async def backup_command(update: Update, context: CallbackContext):
         formatted_mnemonic = f"```\n{mnemonic}\n```"
         
         # Send the mnemonic phrase with a warning
-        await update.message.reply_text(
+        await send_self_destructing_message(
+            update,
+            context,
             "⚠️ *IMPORTANT SECURITY WARNING* ⚠️\n\n"
             "Below is your recovery phrase. It provides *FULL ACCESS* to your wallet funds.\n\n"
             "🔒 *NEVER* share this with anyone\n"

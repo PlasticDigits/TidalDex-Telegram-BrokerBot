@@ -5,6 +5,9 @@ import atexit
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 import traceback
 
+from warnings import filterwarnings
+from telegram.warnings import PTBUserWarning
+
 # Import custom modules
 from utils.chat import create_private_chat_wrapper
 from utils.config import TELEGRAM_BOT_TOKEN
@@ -34,9 +37,10 @@ from commands.cancel import cancel
 from commands.recovery import (
     recovery_choice_callback, process_private_key, 
     process_mnemonic, process_wallet_name as recovery_process_wallet_name,
-    pin_protected_backup, pin_protected_recover, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
+    pin_protected_recover, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
     WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME as RECOVERY_ENTERING_WALLET_NAME
 )
+from commands.backup import pin_protected_backup
 from commands.help import universal_help_command
 from commands.wallets import wallets_command, wallet_selection_callback, SELECTING_WALLET
 from commands.addwallet import (
@@ -51,6 +55,9 @@ from commands.set_pin import (
     ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN
 )
 
+
+filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -61,7 +68,7 @@ logging.basicConfig(
     ]
 )
 # Set specific module log levels
-# logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.ERROR)  # Disable httpx request logs
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.INFO)
@@ -208,6 +215,7 @@ def main() -> None:
     application.add_handler(set_pin_conv_handler)
     
     # Add handlers for sensitive message buttons (self-destructing messages)
+    logger.info(f"Registering sensitive message button handlers with patterns: '{SHOW_SENSITIVE_INFO}' and '{DELETE_NOW}'")
     application.add_handler(CallbackQueryHandler(
         show_sensitive_information, 
         pattern=f"^{SHOW_SENSITIVE_INFO}"

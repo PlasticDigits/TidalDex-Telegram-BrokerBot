@@ -5,6 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from db.utils import hash_user_id
 import db
+from db.wallet import get_active_wallet_name
 import logging
 import traceback
 from wallet.mnemonic import derive_wallet_from_mnemonic, create_mnemonic
@@ -22,9 +23,12 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Get PIN from PINManager
         pin = pin_manager.get_pin(user_id)
         
+        # Get active wallet name
+        wallet_name = get_active_wallet_name(user_id)
+        
         # Check if user already has a wallet
         logger.debug(f"Checking if user {user_id} has an existing wallet")
-        user_wallet = db.get_user_wallet(user_id, pin=pin)
+        user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
         logger.debug(f"User wallet result: {user_wallet is not None}")
         
         # Get all wallets for the user

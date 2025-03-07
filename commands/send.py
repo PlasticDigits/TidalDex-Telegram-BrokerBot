@@ -1,6 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 import db
+from db.wallet import get_active_wallet_name
 import wallet
 from utils import token
 from wallet.utils import validate_address
@@ -23,7 +24,11 @@ MAX_SYMBOL_LENGTH = 20    # Token symbols are typically short
 async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the send process."""
     user_id = update.effective_user.id
-    user_wallet = db.get_user_wallet(user_id)
+    
+    # Get active wallet name and use pin_manager for PIN
+    wallet_name = get_active_wallet_name(user_id)
+    pin = pin_manager.get_pin(user_id)
+    user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
@@ -177,11 +182,14 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     user_id = update.effective_user.id
     
-    # Get PIN from PINManager   
+    # Get PIN from pin_manager instead of context
     pin = pin_manager.get_pin(user_id)
     
+    # Get active wallet name
+    wallet_name = get_active_wallet_name(user_id)
+    
     # Get user wallet with PIN if required
-    user_wallet = db.get_user_wallet(user_id, pin)
+    user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
@@ -415,11 +423,14 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     user_id = update.effective_user.id
     
-    # Get PIN from PINManager
+    # Get PIN from pin_manager instead of context
     pin = pin_manager.get_pin(user_id)
     
+    # Get active wallet name
+    wallet_name = get_active_wallet_name(user_id)
+    
     # Get user wallet with PIN if required
-    user_wallet = db.get_user_wallet(user_id, pin)
+    user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")

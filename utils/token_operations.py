@@ -3,11 +3,12 @@ Utility module for token operations.
 """
 from utils.web3_connection import w3
 from utils import load_abi
+from utils.token import find_token
 
 # Cache the ABI to avoid loading it multiple times
 ERC20_ABI = load_abi("ERC20")
 
-def get_token_contract(token_address, status_callback=None):
+def get_token_contract(token_address):
     """
     Create a token contract instance from a token address.
     
@@ -18,19 +19,14 @@ def get_token_contract(token_address, status_callback=None):
     Returns:
         Contract: The web3 contract instance
     """
-    if status_callback:
-        status_callback("Converting token address to checksum format...")
     
     # Convert to checksum address
     checksum_token_address = w3.to_checksum_address(token_address)
     
-    if status_callback:
-        status_callback("Creating token contract instance...")
-    
     # Create contract instance using the full ERC20 ABI
     return w3.eth.contract(address=checksum_token_address, abi=ERC20_ABI)
 
-def get_token_details(token_contract, status_callback=None):
+async def get_token_details(token_contract, status_callback=None):
     """
     Get token symbol and decimals from a token contract.
     
@@ -46,26 +42,39 @@ def get_token_details(token_contract, status_callback=None):
             }
     """
     if status_callback:
-        status_callback("Fetching token details (symbol, decimals)...")
+        await status_callback("Fetching token details...")
+    
+    # First, check if the token exists in our default token list for faster access
+    token_address = token_contract.address.lower()
+    token_info = find_token(address=token_address)
+    
+    if token_info:
+
+        return {
+            'symbol': token_info['symbol'],
+            'decimals': token_info.get('decimals', 18)
+        }
+    
+    # If not in our list, proceed with blockchain calls
     
     # Get token symbol
     try:
         symbol = token_contract.functions.symbol().call()
         if status_callback:
-            status_callback(f"Retrieved token symbol: {symbol}")
+            await status_callback(f"Retrieved token symbol: {symbol}")
     except Exception as e:
         if status_callback:
-            status_callback(f"Error fetching token symbol: {str(e)}")
+            await status_callback(f"Error fetching token symbol: {str(e)}")
         symbol = "UNKNOWN"
     
     # Get token decimals
     try:
         decimals = token_contract.functions.decimals().call()
         if status_callback:
-            status_callback(f"Retrieved token decimals: {decimals}")
+            await status_callback(f"Retrieved token decimals: {decimals}")
     except Exception as e:
         if status_callback:
-            status_callback(f"Error fetching token decimals: {str(e)}")
+            await status_callback(f"Error fetching token decimals: {str(e)}")
         decimals = 18  # Default to 18 decimals if we can't fetch
     
     return {

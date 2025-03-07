@@ -40,8 +40,16 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_command = context.user_data['pending_command']
     logger.debug(f"Processing potential PIN input for pending command: {pending_command}")
     
+    # First try to delete the PIN message for security
+    try:
+        await update.message.delete()
+        logger.debug(f"Deleted PIN input message for security")
+    except Exception as e:
+        logger.warning(f"Could not delete PIN message: {e}")
+    
     # Try to verify the PIN
     if not pin_manager.verify_pin(user_id, input_text):
+        # Send this as a new message since we deleted the original
         await update.message.reply_text(
             "❌ Invalid PIN. Please try again or use the original command."
         )
@@ -58,7 +66,7 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Import command handlers here to avoid circular imports
         from commands.wallet import wallet_command
-        from commands.recovery import backup_command
+        from commands.backup import backup_command
         from commands.export_key import export_key_command
         
         # Map of command names to handlers
