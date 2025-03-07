@@ -5,8 +5,6 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import db
 import logging
-import traceback
-
 # Enable logging
 logger = logging.getLogger(__name__)
 

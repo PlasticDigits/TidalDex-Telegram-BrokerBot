@@ -6,6 +6,7 @@ from utils import token
 from wallet.utils import validate_address
 from utils.status_updates import create_status_callback
 from utils.gas_estimation import estimate_bnb_transfer_gas, estimate_token_transfer_gas, estimate_max_bnb_transfer
+from services.pin import require_pin, pin_manager
 import logging
 
 # Enable logging
@@ -175,10 +176,21 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return ConversationHandler.END
     
     user_id = update.effective_user.id
-    user_wallet = db.get_user_wallet(user_id)
+    
+    # Get PIN from PINManager   
+    pin = pin_manager.get_pin(user_id)
+    
+    # Get user wallet with PIN if required
+    user_wallet = db.get_user_wallet(user_id, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
+        return ConversationHandler.END
+    
+    # Check if we have a valid private key
+    if not user_wallet.get('private_key') or user_wallet.get('decryption_failed', False):
+        error_message = "Cannot send transaction: Unable to access wallet private key."
+        await update.message.reply_text(f"❌ {error_message}")
         return ConversationHandler.END
     
     # Initial response with loading indicator
@@ -402,10 +414,21 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     
     user_id = update.effective_user.id
-    user_wallet = db.get_user_wallet(user_id)
+    
+    # Get PIN from PINManager
+    pin = pin_manager.get_pin(user_id)
+    
+    # Get user wallet with PIN if required
+    user_wallet = db.get_user_wallet(user_id, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
+        return ConversationHandler.END
+    
+    # Check if we have a valid private key
+    if not user_wallet.get('private_key') or user_wallet.get('decryption_failed', False):
+        error_message = "Cannot send transaction: Unable to access wallet private key."
+        await update.message.reply_text(f"❌ {error_message}")
         return ConversationHandler.END
     
     # Initial response with loading indicator
@@ -521,4 +544,9 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "Please check your balance and try again."
         )
     
-    return ConversationHandler.END 
+    return ConversationHandler.END
+
+# Create PIN-protected versions of the conversation handlers
+pin_protected_send = require_pin(
+    "🔒 Sending assets requires PIN verification.\nPlease enter your PIN:"
+)(send_command) 

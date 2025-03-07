@@ -1,12 +1,13 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler
 import db
 import wallet
 import logging
 import traceback
 import re
 from wallet.mnemonic import derive_wallet_from_mnemonic
-from utils.message_security import send_self_destructing_message
+from utils.self_destruction_message import send_self_destructing_message
+from services.pin import require_pin, pin_manager
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     if user_temp_data[user_id]['action'] == 'create_wallet':
         try:
             # Check if user already has a mnemonic
-            existing_mnemonic = db.get_user_mnemonic(user_id)
+            existing_mnemonic = db.get_user_mnemonic(user_id, pin_manager.get_pin(user_id))
             
             if existing_mnemonic:
                 # User has existing mnemonic, derive wallet with next index
@@ -131,7 +132,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 }
                 
                 # Save wallet
-                db.save_user_wallet(user_id, wallet_to_save, wallet_name)
+                db.save_user_wallet(user_id, wallet_to_save, wallet_name, pin_manager.get_pin(user_id))
                 
                 # Normal message since no seed phrase is shown
                 # Do not need to show path, since we are using the standard BSC/ETH path
@@ -157,10 +158,10 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 }
                 
                 # Save wallet
-                db.save_user_wallet(user_id, wallet_to_save, wallet_name)
+                db.save_user_wallet(user_id, wallet_to_save, wallet_name, pin_manager.get_pin(user_id))
                 
                 # Save mnemonic separately
-                db.save_user_mnemonic(user_id, mnemonic)
+                db.save_user_mnemonic(user_id, mnemonic, pin_manager.get_pin(user_id))
                 
                 # Send self-destructing message with seed phrase
                 # Note: This will first show a security warning with a button
@@ -260,7 +261,7 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
         }
         
         # Save the wallet
-        db.save_user_wallet(user_id, imported_wallet, wallet_name)
+        db.save_user_wallet(user_id, imported_wallet, wallet_name, pin_manager.get_pin(user_id))
         
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -279,3 +280,8 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Clean up temp data
     del user_temp_data[user_id]
     return ConversationHandler.END 
+
+# Create a PIN-protected version of the command
+pin_protected_addwallet = require_pin(
+    "🔒 Adding a wallet requires PIN verification.\nPlease enter your PIN:"
+)(addwallet_command) 

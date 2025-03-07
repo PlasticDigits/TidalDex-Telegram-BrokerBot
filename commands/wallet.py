@@ -1,11 +1,14 @@
+"""
+Wallet management commands.
+"""
 from telegram import Update
 from telegram.ext import ContextTypes
+from db.utils import hash_user_id
 import db
-import wallet
 import logging
 import traceback
-from wallet.mnemonic import derive_wallet_from_mnemonic
-from utils.message_security import send_self_destructing_message
+from wallet.mnemonic import derive_wallet_from_mnemonic, create_mnemonic
+from services.pin import require_pin, pin_manager
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -16,157 +19,94 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info(f"Wallet command called by user {user_id}")
     
     try:
+        # Get PIN from PINManager
+        pin = pin_manager.get_pin(user_id)
+        
         # Check if user already has a wallet
         logger.debug(f"Checking if user {user_id} has an existing wallet")
-        user_wallet = db.get_user_wallet(user_id)
+        user_wallet = db.get_user_wallet(user_id, pin=pin)
         logger.debug(f"User wallet result: {user_wallet is not None}")
         
-        if not user_wallet:
-            # Check if user already has a mnemonic
-            existing_mnemonic = db.get_user_mnemonic(user_id)
-            
-            if existing_mnemonic:
-                # User has existing mnemonic, derive wallet with index 0
-                logger.info(f"Creating first wallet for user {user_id} from existing mnemonic")
-                logger.debug("User has existing mnemonic, deriving new wallet")
-                
-                # Derive a new wallet from the existing mnemonic (first wallet = index 0)
-                new_wallet = derive_wallet_from_mnemonic(existing_mnemonic, index=0)
-                
-                # Save the wallet
-                wallet_to_save = {
-                    'address': new_wallet['address'],
-                    'private_key': new_wallet['private_key'],
-                    'path': new_wallet['path']
-                }
-                
-                # Save wallet
-                logger.debug(f"Saving wallet for user {user_id}")
-                db.save_user_wallet(user_id, wallet_to_save, "Default")
-                logger.debug("Wallet saved successfully")
-                
-                await update.message.reply_text(
-                    "🎉 Your wallet has been created from your existing seed phrase!\n\n"
-                    f"Address: <code>{new_wallet['address']}</code>\n\n"
-                    "Use /backup to backup your recovery phrase\n"
-                    "Use /balance to check your balances\n"
-                    "Use /send to send funds\n"
-                    "Use /receive to get your address for receiving funds",
-                    parse_mode='HTML'
-                )
-                
-                # Suggest setting up a PIN for security
-                await update.message.reply_text(
-                    "🔐 <b>Security Recommendation</b>\n\n"
-                    "For enhanced wallet security, consider setting up a PIN code.\n"
-                    "Your PIN will protect sensitive operations and wallet access.\n\n"
-                    "Use /set_pin to create your security PIN.",
-                    parse_mode='HTML'
-                )
-            else:
-                # Generate a new mnemonic phrase
-                logger.info(f"Creating new wallet with new mnemonic for user {user_id}")
-                logger.debug("Generating new mnemonic phrase")
-                mnemonic = wallet.create_mnemonic()
-                logger.debug("Mnemonic generated successfully")
-                
-                # Create a wallet from the mnemonic
-                logger.debug("Creating wallet from mnemonic")
-                new_wallet = wallet.create_mnemonic_wallet(mnemonic)
-                logger.debug(f"Wallet created with address: {new_wallet['address']}")
-                
-                # Remove mnemonic from wallet object before saving
-                wallet_to_save = {
-                    'address': new_wallet['address'],
-                    'private_key': new_wallet['private_key'],
-                    'path': new_wallet['path']
-                }
-                
-                # Save wallet without mnemonic
-                logger.debug(f"Saving wallet for user {user_id}")
-                db.save_user_wallet(user_id, wallet_to_save, "Default")
-                logger.debug("Wallet saved successfully")
-                
-                # Save mnemonic separately
-                logger.debug("Saving mnemonic separately")
-                db.save_user_mnemonic(user_id, mnemonic)
-                logger.debug("Mnemonic saved successfully")
-                
-                # Instead of showing the seed phrase, only show the wallet address
-                await update.message.reply_text(
-                    "🎉 Your wallet has been created!\n\n"
-                    f"Address: <code>{new_wallet['address']}</code>\n\n"
-                    "Your recovery phrase is securely stored. Use /backup when you're ready to save it\n"
-                    "<b>⚠️ Without your recovery phrase, you will <i>NOT be able to recover your wallet!</i></b>",
-                    parse_mode='HTML'
-                )
-                
-                # Send follow-up info message
-                await update.message.reply_text(
-                    "Use /backup to backup your recovery phrase\n"
-                    "Use /balance to check your balances\n"
-                    "Use /send to send funds\n"
-                    "Use /receive to get your address for receiving funds",
-                    parse_mode='HTML'
-                )
-                
-                # Suggest setting up a PIN for security
-                await update.message.reply_text(
-                    "🔐 <b>Security Recommendation</b>\n\n"
-                    "For enhanced wallet security, consider setting up a PIN code.\n"
-                    "Your PIN will protect sensitive operations and wallet access.\n\n"
-                    "Use /set_pin to create your security PIN.",
-                    parse_mode='HTML'
-                )
-        else:
-            logger.info(f"Displaying existing wallet info for user {user_id}")
-            # Get all user wallets
-            logger.debug("Getting all user wallets")
-            user_wallets = db.get_user_wallets(user_id)
-            logger.debug(f"Found {len(user_wallets)} wallets")
-            
-            # Get active wallet name
-            active_wallet_name = next((name for name, info in user_wallets.items() if info['is_active']), "Default")
-            logger.debug(f"Active wallet: {active_wallet_name}")
-            
-            # Show all wallets with active wallet highlighted
-            wallets_text = "Your wallets:\n"
-            for name, info in user_wallets.items():
-                prefix = "🔷 " if info['is_active'] else "○ "
-                # Use HTML code tags instead of Markdown backticks for code formatting
-                address = info['address']
-                wallets_text += f"{prefix}{name}: <code>{address}</code>\n"
-            
-            # Check if user has a master mnemonic
-            logger.debug("Checking if user has a mnemonic")
-            has_mnemonic = db.get_user_mnemonic(user_id) is not None
-            wallet_type = "Seed Phrase Wallet" if has_mnemonic else "Private Key Wallet"
-            logger.debug(f"Wallet type: {wallet_type}")
-            
-            # Show active wallet details with HTML formatting
-            logger.debug("Sending wallet info message")
-            await update.message.reply_text(
-                f"{wallets_text}\n"
-                f"Currently active: <b>{active_wallet_name}</b> ({wallet_type})\n\n"
-                "Use /wallets to switch between wallets\n"
-                "Use /addwallet to add a new wallet\n"
-                "Use /balance to check your balances\n"
-                "Use /send to send funds\n"
-                "Use /receive to get your address for receiving funds",
-                parse_mode='HTML'  # Changed from Markdown to HTML
-            )
-            logger.debug("Wallet info message sent")
-    except Exception as e:
-        logger.error(f"Error in wallet command: {e}")
-        logger.error(traceback.format_exc())
+        # Get all wallets for the user
+        all_wallets = db.get_user_wallets(user_id)
+        wallet_count = len(all_wallets) if all_wallets else 0
         
-        # Notify the user about the error
-        try:
+        if not user_wallet:
+            # No wallet found, generate a new one
+            logger.info(f"No wallet found for user {user_id}, creating a new wallet")
+            
+            # First, generate a new mnemonic
+            mnemonic = create_mnemonic()
+            logger.debug(f"New mnemonic generated for user {user_id}")
+            
+            # Now derive a wallet from this mnemonic
+            wallet_info = derive_wallet_from_mnemonic(mnemonic, index=0)
+            
+            if not wallet_info:
+                logger.error(f"Failed to generate wallet for user {user_id}")
+                await update.message.reply_text(
+                    "❌ Failed to create a wallet. Please try again later."
+                )
+                return
+            
+            # Save the mnemonic and wallet to the database, with PIN if provided
+            db.save_user_mnemonic(user_id, mnemonic, pin)
+            db.save_user_wallet(user_id, wallet_info, "Default", pin)
+            
+            # Get the saved wallet
+            user_wallet = db.get_user_wallet(user_id, pin)
+            
+            # Show welcome message
             await update.message.reply_text(
-                "⚠️ An error occurred while processing your wallet command.\n"
-                "Please try again later or contact support."
+                "🎉 Your new wallet has been created!\n\n"
+                f"Address: `{wallet_info['address']}`\n\n"
+                "Remember to back up your recovery phrase with /backup\n"
+                "Use /send to send tokens and /receive to receive tokens",
+                parse_mode='Markdown'
             )
-        except Exception as send_error:
-            logger.error(f"Error sending error message: {send_error}")
-    
-    logger.info("Wallet command completed") 
+            
+            logger.info(f"New wallet created for user {user_id}")
+            return
+        
+        # We have a wallet with decrypted data
+        wallet_name = user_wallet.get('name', 'Default')
+        address = user_wallet.get('address')
+        
+        # Format the wallet info message
+        message = f"💼 *Wallet: {wallet_name}*\n\n"
+        message += f"🔑 Address: `{address}`\n\n"
+        
+        # Add total wallet count if user has multiple wallets
+        if wallet_count > 1:
+            message += f"You have {wallet_count} wallets. Use /wallets to view and switch between them.\n\n"
+        
+        # Add helpful commands
+        message += "Commands:\n"
+        message += "• /send - Send tokens\n"
+        message += "• /receive - Show address to receive tokens\n"
+        message += "• /balance - Check your balance\n"
+        message += "• /backup - Show recovery phrase\n"
+        
+        if wallet_count > 1:
+            message += "• /wallets - Manage multiple wallets\n"
+        else:
+            message += "• /addwallet - Add another wallet\n"
+        
+        await update.message.reply_text(
+            message,
+            parse_mode='Markdown'
+        )
+        
+        logger.info(f"Wallet info displayed for user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in wallet_command: {e}")
+        logger.error(traceback.format_exc())
+        await update.message.reply_text(
+            "❌ An error occurred while retrieving your wallet information. Please try again later."
+        )
+
+# Create a PIN-protected version of the command
+pin_protected_wallet = require_pin(
+    "🔒 Your wallet information requires PIN verification.\nPlease enter your PIN:"
+)(wallet_command) 

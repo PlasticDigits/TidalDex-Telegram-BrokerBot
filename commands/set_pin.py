@@ -1,145 +1,138 @@
 """
-Command for setting or changing the user's PIN.
+Set PIN command for wallet security.
+
+This module handles setting and updating the user's PIN for wallet security.
 """
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 import logging
-from utils.pin_ops import save_user_pin, verify_pin, has_pin, validate_pin_complexity, can_attempt_pin
+import traceback
+import re
+from db.utils import hash_user_id
+from services.pin.PINManager import pin_manager
 
 # Enable logging
 logger = logging.getLogger(__name__)
 
 # Conversation states
-ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN = range(3)
+ENTERING_CURRENT_PIN, ENTERING_PIN, CONFIRMING_PIN = range(3)
 
-# Temporary data storage
+# Store temporary data during conversation
 user_temp_data = {}
 
 async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the process of setting or changing a PIN."""
+    """
+    Start the process of setting or updating a PIN.
+    If the user already has a PIN, they will be asked to enter it first.
+    Otherwise, they will be asked to set a new PIN.
+    """
     user_id = update.effective_user.id
+    user_id_str = hash_user_id(user_id)
+    
+    logger.info(f"Set PIN command initiated by user {user_id_str}")
+    
+    # Initialize user temp data
+    if user_id not in user_temp_data:
+        user_temp_data[user_id] = {}
     
     # Check if user already has a PIN
-    if has_pin(user_id):
-        # Check if user is allowed to attempt PIN entry (not in lockout period)
-        can_attempt, lockout_remaining = can_attempt_pin(user_id)
-        if not can_attempt:
-            # User is in lockout period
-            minutes = lockout_remaining // 60
-            seconds = lockout_remaining % 60
-            time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
-            
-            await update.message.reply_text(
-                f"⚠️ Your account is temporarily locked due to too many failed PIN attempts.\n\n"
-                f"Please try again in {time_str}."
-            )
-            return ConversationHandler.END
-        
+    has_existing_pin = pin_manager.needs_pin(user_id)
+    user_temp_data[user_id]['is_updating'] = has_existing_pin
+    
+    if has_existing_pin:
+        logger.info(f"User {user_id_str} already has a PIN, will update it")
         await update.message.reply_text(
-            "You already have a PIN set.\n\n"
-            "Please enter your current PIN to continue, or use /cancel to abort."
+            "🔐 You already have a PIN set. "
+            "To update your PIN, please enter your current PIN first:"
         )
         return ENTERING_CURRENT_PIN
     else:
+        logger.info(f"User {user_id_str} does not have a PIN, will set a new one")
         await update.message.reply_text(
-            "🔐 Setting a PIN adds an extra layer of security to your wallet.\n\n"
-            "Your PIN will be required for sensitive operations such as viewing private keys "
-            "and making transactions.\n\n"
+            "🔐 Setting a PIN will encrypt your wallet's sensitive data.\n\n"
             "PIN requirements:\n"
-            "• Must be 4-48 characters long\n"
+            "• Must be 6-48 characters long\n"
             "• Can include letters, numbers, and special characters\n"
-            "• Its your responsibility to choose a secure PIN\n"
-            "• 1111 is better than nothing, but not secure\n"
-            "Please create your PIN:"
+            "• You are responsible for picking a secure PIN\n"
+            "Please enter your new PIN:"
         )
         return ENTERING_PIN
 
 async def process_current_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Verify the current PIN before allowing changes."""
+    """
+    Verify the user's current PIN before allowing an update.
+    """
     user_id = update.effective_user.id
+    user_id_str = hash_user_id(user_id)
     current_pin = update.message.text.strip()
     
     # Delete the message with PIN for security
     try:
         await update.message.delete()
     except Exception as e:
-        logger.warning(f"Could not delete message with PIN: {e}")
-    
-    # Check if user is allowed to attempt PIN entry
-    can_attempt, lockout_remaining = can_attempt_pin(user_id)
-    if not can_attempt:
-        # User is in lockout period
-        minutes = lockout_remaining // 60
-        seconds = lockout_remaining % 60
-        time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
-        
-        await update.message.reply_text(
-            f"⚠️ Your account is temporarily locked due to too many failed PIN attempts.\n\n"
-            f"Please try again in {time_str}."
-        )
-        return ConversationHandler.END
+        logger.warning(f"Could not delete message with current PIN: {e}")
     
     # Verify the current PIN
-    if verify_pin(user_id, current_pin):
+    if not pin_manager.verify_pin(user_id, current_pin):
+        logger.warning(f"Invalid current PIN provided by user {user_id_str}")
         await update.message.reply_text(
-            "PIN verified.\n\n"
-            "PIN requirements:\n"
-            "• Must be 4-48 characters long\n"
-            "• Can include letters, numbers, and special characters\n"
-            "• Its your responsibility to choose a secure PIN\n"
-            "• 1111 is better than nothing, but not secure\n"
-            "Please enter your new PIN:"
+            "❌ Invalid PIN. Please try again or use /cancel to abort."
         )
-        return ENTERING_PIN
-    else:
-        # Get updated lockout status after the failed attempt
-        can_attempt, lockout_remaining = can_attempt_pin(user_id)
-        
-        if not can_attempt:
-            # User is now in lockout period after this failed attempt
-            minutes = lockout_remaining // 60
-            seconds = lockout_remaining % 60
-            time_str = f"{minutes} minute(s) and {seconds} second(s)" if minutes > 0 else f"{seconds} second(s)"
-            
-            await update.message.reply_text(
-                f"❌ Incorrect PIN. Too many failed attempts.\n\n"
-                f"Your account is temporarily locked for {time_str}."
-            )
-            return ConversationHandler.END
-        else:
-            await update.message.reply_text(
-                "❌ Incorrect PIN. Please try again or use /cancel to abort."
-            )
-            return ENTERING_CURRENT_PIN
+        return ENTERING_CURRENT_PIN
+    
+    # Store the verified current PIN
+    user_temp_data[user_id]['old_pin'] = current_pin
+    
+    # Request new PIN
+    logger.info(f"Current PIN verified for user {user_id_str}, requesting new PIN")
+    await update.message.reply_text(
+        "✅ Current PIN verified. Please enter your new PIN:\n\n"
+        "PIN requirements:\n"
+        "PIN requirements:\n"
+        "• Must be 6-48 characters long\n"
+        "• Can include letters, numbers, and special characters\n"
+        "• You are responsible for picking a secure PIN\n"
+        "Please enter your new PIN:"
+    )
+    return ENTERING_PIN
 
 async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process the user's new PIN."""
+    """
+    Process the new PIN entry and check if it meets requirements.
+    """
     user_id = update.effective_user.id
+    user_id_str = hash_user_id(user_id)
     new_pin = update.message.text.strip()
     
     # Delete the message with PIN for security
     try:
         await update.message.delete()
     except Exception as e:
-        logger.warning(f"Could not delete message with PIN: {e}")
+        logger.warning(f"Could not delete message with new PIN: {e}")
     
-    # Validate PIN format using enhanced complexity validation
+    # Validate PIN complexity
     is_valid, error_message = validate_pin_complexity(new_pin)
+    
     if not is_valid:
         await update.message.reply_text(
             f"❌ {error_message}\n\n"
             "PIN requirements:\n"
-            "• Must be 6-8 digits long\n"
-            "• Must contain only numbers\n"
-            "• Cannot contain the same digit repeated more than 3 times in a row\n"
-            "• Cannot contain sequential digits like 1234 or 4321\n"
-            "• Cannot be all the same digit\n\n"
+            "• Must be 6-48 characters long\n"
+            "• You are responsible for picking a secure PIN\n"
             "Please try again or use /cancel to abort."
         )
         return ENTERING_PIN
     
+    # Ensure the user temp data structure exists
+    if user_id not in user_temp_data:
+        user_temp_data[user_id] = {}
+    
     # Store PIN temporarily
-    user_temp_data[user_id] = {'pin': new_pin}
+    user_temp_data[user_id]['pin'] = new_pin
+    
+    # Preserve is_updating and old_pin flags if this is a PIN update
+    if 'is_updating' not in user_temp_data[user_id]:
+        user_temp_data[user_id]['is_updating'] = False
     
     # Ask for confirmation
     await update.message.reply_text(
@@ -150,6 +143,7 @@ async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Confirm the PIN and save it if it matches."""
     user_id = update.effective_user.id
+    user_id_str = hash_user_id(user_id)
     confirmation_pin = update.message.text.strip()
     
     # Delete the message with PIN for security
@@ -158,55 +152,102 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     except Exception as e:
         logger.warning(f"Could not delete message with PIN: {e}")
     
-    # Check if user has temp data
-    if user_id not in user_temp_data or 'pin' not in user_temp_data[user_id]:
+    # Check if we have the user's temporary data
+    if user_id not in user_temp_data:
+        logger.error(f"User temp data not found for user {user_id_str}")
         await update.message.reply_text(
-            "❌ Something went wrong. Please start over with /set_pin."
+            "❌ An error occurred. Please start over with /set_pin."
         )
         return ConversationHandler.END
     
-    original_pin = user_temp_data[user_id]['pin']
+    # Get the PIN from temporary data
+    new_pin = user_temp_data[user_id].get('pin')
+    is_updating = user_temp_data[user_id].get('is_updating', False)
     
     # Check if PINs match
-    if confirmation_pin != original_pin:
+    if new_pin != confirmation_pin:
+        logger.warning(f"PIN confirmation failed for user {user_id_str}")
         await update.message.reply_text(
-            "❌ PINs do not match. Please try again."
+            "❌ PINs do not match. Please start over."
         )
-        return ENTERING_PIN
+        if user_id in user_temp_data:
+            del user_temp_data[user_id]
+        return ConversationHandler.END
     
-    # Save the PIN with the new function that returns success status and error message
-    success, error_message = save_user_pin(user_id, original_pin)
+    # PINs match, save to database
+    try:
+        if is_updating:
+                # Update the PIN in the PIN manager as well
+            logger.info(f"Updating PIN for user {user_id_str} with data re-encryption")
+            success = pin_manager.set_pin(user_id, new_pin)
+            if success:
+                logger.info(f"Successfully updated PIN for user {user_id_str}")
+                await update.message.reply_text(
+                    "✅ Your PIN has been updated successfully!\n\n"
+                    "All your wallets and sensitive data have been re-encrypted with this new PIN.\n\n"
+                    "Remember to use this PIN for all sensitive operations"
+                )
+            else:
+                logger.error(f"Failed to update PIN for user {user_id_str}")
+                await update.message.reply_text(
+                    f"❌ Failed to update PIN. Please try again later."
+                )
+        else:
+            # Set initial PIN in database and encrypt wallet data
+            logger.info(f"Setting initial PIN for user {user_id_str} with data re-encryption")
+            success = pin_manager.set_pin(user_id, new_pin)
+            if success:
+                logger.info(f"Successfully set initial PIN for user {user_id_str}")
+                await update.message.reply_text(
+                    "✅ Your PIN has been set successfully!\n\n"
+                    "All your wallets and sensitive data have been re-encrypted with this PIN.\n\n"
+                    "You'll need to enter this PIN for all sensitive operations from now on."
+                )
+            else:
+                logger.error(f"Failed to set PIN for user {user_id_str}: {error}")
+                await update.message.reply_text(
+                    f"❌ Failed to set PIN. Please try again later."
+                )
+    except Exception as e:
+        logger.error(f"Error in PIN operation for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        await update.message.reply_text(
+            "❌ An error occurred while setting your PIN. Please try again later."
+        )
     
     # Clean up temp data
     if user_id in user_temp_data:
         del user_temp_data[user_id]
-    
-    if success:
-        await update.message.reply_text(
-            "✅ PIN set successfully!\n\n"
-            "Your PIN will now be required for sensitive operations. "
-            "Please remember this PIN as it's used to secure your wallet data.\n\n"
-            "⚠️ If you enter an incorrect PIN too many times, your account will be temporarily locked "
-            "as a security measure."
-        )
-    else:
-        await update.message.reply_text(
-            f"❌ Failed to set PIN. {error_message}\n\n"
-            "Please try again later."
-        )
     
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the PIN setting process."""
     user_id = update.effective_user.id
+    user_id_str = hash_user_id(user_id)
     
-    # Clean up temp data
+    # Clean up any temporary data
     if user_id in user_temp_data:
         del user_temp_data[user_id]
     
+    logger.info(f"PIN setting canceled by user {user_id_str}")
     await update.message.reply_text(
-        "PIN setup cancelled. Your PIN remains unchanged."
+        "🚫 PIN setting canceled. Your current PIN settings remain unchanged."
     )
+    return ConversationHandler.END
+
+def validate_pin_complexity(pin):
+    """
+    Validate that the PIN meets complexity requirements.
     
-    return ConversationHandler.END 
+    Args:
+        pin (str): The PIN to validate
+        
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    # Check length (6-48 characters)
+    if len(pin) < 6 or len(pin) > 48:
+        return False, "PIN must be between 6 and 48 characters long."
+    
+    return True, "" 

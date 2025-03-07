@@ -4,29 +4,29 @@ Database operations for PIN management.
 import logging
 import traceback
 from db.connection import execute_query
-from db.utils import hash_user_id
+from db.utils import hash_user_id, hash_pin
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-def save_user_pin(user_id, pin_hash):
+def save_user_pin(user_id, pin):
     """
-    Save a hashed PIN for a user to the database.
+    Save a PIN for a user to the database.
     
     Args:
         user_id: The user ID
-        pin_hash (str): The hashed PIN to save
+        pin (str): The plaintext PIN to save as a hash
         
     Returns:
         bool: True if successful, False otherwise
     """
-    if not pin_hash:
-        logger.warning(f"Invalid PIN hash provided for user {user_id}")
+    if not pin:
+        logger.warning(f"Invalid PIN provided for user {user_id}")
         return False
     
     # Hash the user ID for database lookup
     user_id_str = hash_user_id(user_id)
-    
+    pin_hash = hash_pin(pin)
     try:
         # Update the user's PIN hash in the database
         execute_query(
@@ -80,4 +80,46 @@ def has_pin(user_id):
     Returns:
         bool: True if the user has a PIN, False otherwise
     """
-    return get_user_pin_hash(user_id) is not None 
+    return get_user_pin_hash(user_id) is not None
+
+def verify_pin(user_id, pin):
+    """
+    Verify if a provided PIN matches the stored hash for a user.
+    
+    Args:
+        user_id: The user ID
+        pin (str): The plain text PIN to verify
+        
+    Returns:
+        bool: True if the PIN is correct, False otherwise
+    """
+    if not pin:
+        logger.warning(f"Empty PIN provided for verification")
+        return False
+    
+    # Hash the user ID for logging
+    user_id_str = hash_user_id(user_id)
+    # Hash the PIN for verification
+    pin_hash = hash_pin(pin)
+    
+    try:
+        # Get the stored PIN hash
+        stored_hash = get_user_pin_hash(user_id)
+        
+        if not stored_hash:
+            logger.warning(f"No PIN hash found for user {user_id_str[:8]}...")
+            return False
+        
+        # Verify the PIN against the stored hash
+        is_valid = pin_hash == stored_hash
+        
+        if is_valid:
+            logger.debug(f"PIN verification successful for user {user_id_str[:8]}...")
+        else:
+            logger.warning(f"PIN verification failed for user {user_id_str[:8]}...")
+        
+        return is_valid
+    except Exception as e:
+        logger.error(f"Error verifying PIN for user {user_id_str[:8]}...: {e}")
+        logger.error(traceback.format_exc())
+        return False 

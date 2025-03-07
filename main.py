@@ -8,43 +8,44 @@ import traceback
 # Import custom modules
 from utils.chat import create_private_chat_wrapper
 from utils.config import TELEGRAM_BOT_TOKEN
-from utils.message_security import (
+from utils.self_destruction_message import (
     show_sensitive_information, delete_sensitive_information,
-    verify_pin_callback, process_pin_verification,
-    SHOW_SENSITIVE_INFO, DELETE_NOW, VERIFY_PIN
+    SHOW_SENSITIVE_INFO, DELETE_NOW
 )
+# Import PIN management system
+from services.pin import handle_pin_input
 # Import restructured database module
 import db
 
 # Import command handlers from commands package
 from commands.start import start
-from commands.wallet import wallet_command
+from commands.wallet import pin_protected_wallet
 from commands.balance import balance_command
 from commands.receive import receive_command
 from commands.send import (
-    send_command, button_callback, 
+    button_callback, 
     send_bnb_amount, send_bnb_address, 
     send_token_symbol, send_token_amount, send_token_address,
     CHOOSING_ACTION, SEND_BNB_AMOUNT, SEND_BNB_ADDRESS, 
-    SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS
+    SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS,
+    pin_protected_send
 )
 from commands.cancel import cancel
 from commands.recovery import (
-    recover_command, recovery_choice_callback, process_private_key, 
+    recovery_choice_callback, process_private_key, 
     process_mnemonic, process_wallet_name as recovery_process_wallet_name,
-    backup_command, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
+    pin_protected_backup, pin_protected_recover, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
     WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME as RECOVERY_ENTERING_WALLET_NAME
 )
-from commands.help import help_command, universal_help_command
+from commands.help import universal_help_command
 from commands.wallets import wallets_command, wallet_selection_callback, SELECTING_WALLET
 from commands.addwallet import (
-    addwallet_command, action_choice_callback, process_wallet_name, process_private_key as add_process_private_key,
-    CHOOSING_ACTION as ADD_CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY
+    action_choice_callback, process_wallet_name, process_private_key as add_process_private_key,
+    CHOOSING_ACTION as ADD_CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY,
+    pin_protected_addwallet
 )
-from commands.export_key import export_key_command
-from commands.rename_wallet import (
-    rename_wallet_command, process_new_name, WAITING_FOR_NAME
-)
+from commands.export_key import pin_protected_export_key
+from commands.rename_wallet import rename_wallet_command, process_new_name, WAITING_FOR_NAME
 from commands.set_pin import (
     set_pin_command, process_pin, confirm_pin, process_current_pin,
     ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN
@@ -52,7 +53,7 @@ from commands.set_pin import (
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
@@ -60,7 +61,7 @@ logging.basicConfig(
     ]
 )
 # Set specific module log levels
-logging.getLogger('httpx').setLevel(logging.WARNING)
+# logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.INFO)
@@ -92,7 +93,7 @@ def main() -> None:
         logger.error(f"Database test failed: {e}")
         logger.error(traceback.format_exc())
         return
-
+    
     # Create the Application
     token = TELEGRAM_BOT_TOKEN
     if not token:
@@ -100,29 +101,32 @@ def main() -> None:
         return
     
     application = Application.builder().token(token).build()
-
+    
     # Create private chat wrappers for all command handlers
     start_wrapper = create_private_chat_wrapper(start)
-    wallet_wrapper = create_private_chat_wrapper(wallet_command)
+    wallet_wrapper = create_private_chat_wrapper(pin_protected_wallet)
     balance_wrapper = create_private_chat_wrapper(balance_command)
     receive_wrapper = create_private_chat_wrapper(receive_command)
-    send_wrapper = create_private_chat_wrapper(send_command)
-    backup_wrapper = create_private_chat_wrapper(backup_command)
-    recover_wrapper = create_private_chat_wrapper(recover_command)
+    send_wrapper = create_private_chat_wrapper(pin_protected_send)
+    backup_wrapper = create_private_chat_wrapper(pin_protected_backup)
+    recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
     wallets_wrapper = create_private_chat_wrapper(wallets_command)
-    addwallet_wrapper = create_private_chat_wrapper(addwallet_command)
-    export_key_wrapper = create_private_chat_wrapper(export_key_command)
+    addwallet_wrapper = create_private_chat_wrapper(pin_protected_addwallet)
+    export_key_wrapper = create_private_chat_wrapper(pin_protected_export_key)
     set_pin_wrapper = create_private_chat_wrapper(set_pin_command)
     rename_wallet_wrapper = create_private_chat_wrapper(rename_wallet_command)
 
-    # Add command handlers with the private chat wrappers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start_wrapper))
+    application.add_handler(CommandHandler("help", universal_help_command))
+    
+    # Add handlers for wallet management
     application.add_handler(CommandHandler("wallet", wallet_wrapper))
     application.add_handler(CommandHandler("balance", balance_wrapper))
     application.add_handler(CommandHandler("receive", receive_wrapper))
     application.add_handler(CommandHandler("backup", backup_wrapper))
     application.add_handler(CommandHandler("export_key", export_key_wrapper))
-    application.add_handler(CommandHandler("help", universal_help_command))
+    application.add_handler(CommandHandler("rename", rename_wallet_wrapper))
     
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
@@ -203,7 +207,7 @@ def main() -> None:
     application.add_handler(rename_wallet_conv_handler)
     application.add_handler(set_pin_conv_handler)
     
-    # Add handlers for sensitive message buttons
+    # Add handlers for sensitive message buttons (self-destructing messages)
     application.add_handler(CallbackQueryHandler(
         show_sensitive_information, 
         pattern=f"^{SHOW_SENSITIVE_INFO}"
@@ -212,15 +216,11 @@ def main() -> None:
         delete_sensitive_information, 
         pattern=f"^{DELETE_NOW}"
     ))
-    application.add_handler(CallbackQueryHandler(
-        verify_pin_callback, 
-        pattern=f"^{VERIFY_PIN}"
-    ))
     
-    # Add handler for PIN verification
+    # Add handler for PIN input
     application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.REPLY,
-        process_pin_verification
+        filters.TEXT & ~filters.COMMAND & ~filters.REPLY,
+        handle_pin_input
     ))
     
     # Add error handler

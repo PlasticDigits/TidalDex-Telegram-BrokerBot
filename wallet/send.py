@@ -2,7 +2,6 @@
 Transaction sending module for BNB and BEP20 tokens.
 """
 from utils.web3_connection import w3
-import os
 from eth_account import Account
 from utils.token_operations import get_token_contract, get_token_details, convert_to_raw_amount
 import time

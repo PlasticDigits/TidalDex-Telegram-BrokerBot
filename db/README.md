@@ -83,10 +83,10 @@ db.init_db()
 wallet = db.get_user_wallet(user_id)
 
 # Save a wallet
-db.save_user_wallet(user_id, wallet_data, wallet_name="Default")
+db.save_user_wallet(user_id, wallet_data, wallet_name="Default", pin=None)
 
 # Save a mnemonic
-db.save_user_mnemonic(user_id, mnemonic)
+db.save_user_mnemonic(user_id, mnemonic, pin=None)
 
 # Close connection when done
 db.close_connection()

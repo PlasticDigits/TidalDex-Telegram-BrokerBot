@@ -30,27 +30,21 @@ def get_encryption_key(salt, user_id=None, pin=None):
     # Convert user_id to string and encode to bytes
     user_id_bytes = str(user_id).encode() if user_id else b"default_user"
     
+    # Ensure ENCRYPTION_KEY is in bytes format
+    encryption_key_bytes = ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
+    
+    # Default combined input with encryption key and user ID
+    combined_input = encryption_key_bytes + b":" + user_id_bytes
+    
     # If a PIN is provided directly, use it
     if pin:
+        # Log that we're using a provided PIN
+        logger.debug(f"Using provided PIN for encryption/decryption for user {user_id}")
         # Combine user_id and PIN for better security
         pin_bytes = str(pin).encode()
         combined_input = user_id_bytes + b":" + pin_bytes
-        password = hashlib.sha256(combined_input).digest()
-    else:
-        # Move the import inside the function to break circular dependency
-        from db.pin import get_user_pin_hash
-        
-        # If no PIN provided, check if user has a PIN hash stored
-        pin_hash = get_user_pin_hash(user_id) if user_id else None
-        
-        if pin_hash:
-            # If user has a PIN hash, incorporate it
-            pin_hash_bytes = pin_hash.encode()
-            combined_input = user_id_bytes + b":" + pin_hash_bytes
-            password = hashlib.sha256(combined_input).digest()
-        else:
-            # Fallback to just user_id if no PIN
-            password = hashlib.sha256(user_id_bytes).digest()
+
+    password = hashlib.sha256(combined_input).digest()
     
     # Use PBKDF2 to derive a secure key
     kdf = PBKDF2HMAC(
@@ -110,6 +104,7 @@ def decrypt_data(encrypted_data, user_id=None, pin=None):
         str: Decrypted data as string or None if decryption fails
     """
     if not encrypted_data:
+        logger.warning(f"No encrypted data provided for user {hash_user_id(user_id)}")
         return None
     
     try:
@@ -125,11 +120,16 @@ def decrypt_data(encrypted_data, user_id=None, pin=None):
         
         # Create a Fernet cipher and decrypt
         f = Fernet(key)
-        decrypted_data = f.decrypt(ciphertext).decode('utf-8')
         
-        return decrypted_data
+        try:
+            decrypted_data = f.decrypt(ciphertext).decode('utf-8')
+            logger.debug(f"Successfully decrypted data for user {hash_user_id(user_id)}")
+            return decrypted_data
+        except Exception as e:
+            logger.error(f"Decryption failed for user {hash_user_id(user_id)}: {e}")
+            return None
     except Exception as e:
-        logger.error(f"Decryption error: {e}")
+        logger.error(f"Error in decrypt_data for user {hash_user_id(user_id)}: {e}")
         logger.error(traceback.format_exc())
         return None
 
@@ -148,5 +148,23 @@ def hash_user_id(user_id):
     
     # Create SHA-256 hash
     hashed = hashlib.sha256(user_id_str).hexdigest()
+    
+    return hashed 
+
+def hash_pin(pin):
+    """
+    Create an irreversible hash of a PIN for database storage.
+    
+    Args:
+        PIN: pin (str)
+        
+    Returns:
+        str: Hexadecimal SHA-256 hash of the PIN
+    """
+    # Convert to string and encode to bytes
+    pin_str = str(pin).encode('utf-8')
+    
+    # Create SHA-256 hash
+    hashed = hashlib.sha256(pin_str).hexdigest()
     
     return hashed 

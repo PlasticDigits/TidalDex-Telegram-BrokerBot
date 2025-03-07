@@ -5,7 +5,6 @@ import secrets
 from eth_account import Account
 from mnemonic import Mnemonic
 import binascii
-from eth_utils import to_checksum_address
 from utils.config import DEFAULT_DERIVATION_PATH, ACCOUNT_PATH_TEMPLATE
 
 # Import BIP functionality
