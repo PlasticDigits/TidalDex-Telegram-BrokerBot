@@ -36,7 +36,15 @@ DEFAULT_DERIVATION_PATH = "m/44'/60'/0'/0/0"  # Default path for first Ethereum 
 ACCOUNT_PATH_TEMPLATE = "m/44'/60'/0'/0/{}"   # Template for deriving multiple accounts
 
 # Database settings
-DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'tidaldex.db')
+DB_TYPE = get_env_var('DB_TYPE', 'sqlite3').lower()  # Database type: sqlite3 or postgresql
+DB_NAME = get_env_var('DB_NAME', 'tidaldex.db')  # Database name or path for SQLite
+DB_HOST = get_env_var('DB_HOST', 'localhost')  # Database host for PostgreSQL
+DB_PORT = int(get_env_var('DB_PORT', '5432'))  # Database port for PostgreSQL
+DB_USER = get_env_var('DB_USER', 'postgres')  # Database user for PostgreSQL
+DB_PASSWORD = get_env_var('DB_PASSWORD', 'postgres')  # Database password for PostgreSQL
+
+# For backward compatibility
+DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', DB_NAME)
 DATABASE_RETRY_MAX_ATTEMPTS = 5  # Maximum number of retries for database operations
 DATABASE_RETRY_INITIAL_WAIT = 0.1  # Initial wait between retries in seconds (doubles with each retry)
 DATABASE_CONNECTION_TIMEOUT = 30.0  # Connection timeout in seconds

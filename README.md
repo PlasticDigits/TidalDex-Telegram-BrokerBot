@@ -43,7 +43,7 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0). Th
 
 For the full license text, see the [LICENSE](LICENSE) file.
 
-Copyright (C) 2023-2024
+Copyright (C) 2025
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

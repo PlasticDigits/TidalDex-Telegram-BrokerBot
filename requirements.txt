@@ -9,3 +9,5 @@ cryptography==44.0.2
 tenacity==9.0.0
 mnemonic==0.21
 eth-utils==5.2.0
+# Optional dependencies
+# psycopg2-binary==2.9.9  # Uncomment for PostgreSQL support (required if DB_TYPE=postgresql)
