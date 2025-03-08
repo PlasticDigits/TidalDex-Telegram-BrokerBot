@@ -1,5 +1,5 @@
 python-dotenv==1.0.1
-python-telegram-bot[job-queue]==21.0
+python-telegram-bot[job-queue]==21.11.1
 web3==7.8.0
 requests==2.31.0
 urllib3==2.0.7
@@ -9,5 +9,8 @@ cryptography==44.0.2
 tenacity==9.0.0
 mnemonic==0.21
 eth-utils==5.2.0
+qrcode==7.4.2
+mnemonic==0.21
+Pillow==10.4.0  # Required by qrcode for image generation
 # Optional dependencies
 # psycopg2-binary==2.9.9  # Uncomment for PostgreSQL support (required if DB_TYPE=postgresql)

@@ -1,73 +1,101 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 import db
-from db.wallet import get_active_wallet_name
+from services.wallet import get_active_wallet_name, get_user_wallets, get_user_wallet, set_active_wallet
 from services.pin import pin_manager
 import logging
 
-# Enable logging
+# Configure module logger
 logger = logging.getLogger(__name__)
 
-# Conversation states
-SELECTING_WALLET = 0
+# Define conversation state
+SELECTING_WALLET = 1
 
 async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Show list of wallets and allow switching between them."""
+    """List all wallets and allow switching between them."""
     user_id = update.effective_user.id
-    
-    # Get PIN from pin_manager
     pin = pin_manager.get_pin(user_id)
     
-    # Get user wallets with PIN
-    user_wallets = db.get_user_wallets(user_id, pin)
+    # Get the current active wallet name
+    active_wallet_name = get_active_wallet_name(user_id)
+    
+    # Get all wallets for the user
+    user_wallets = get_user_wallets(user_id, pin)
     
     if not user_wallets:
         await update.message.reply_text(
-            "You don't have any wallets yet. Use /wallet to create your first wallet or /addwallet to add a new one."
+            "You don't have any wallets. Use /wallet to create one."
         )
         return ConversationHandler.END
     
-    # Create keyboard with wallet options
+    # Create a keyboard with all wallets
     keyboard = []
-    for name, wallet_info in user_wallets.items():
-        # Add indicator for active wallet
-        label = f"🔷 {name} ({wallet_info['address'][:6]}...{wallet_info['address'][-4:]})" if wallet_info['is_active'] else f"{name} ({wallet_info['address'][:6]}...{wallet_info['address'][-4:]})"
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"wallet:{name}")])
+    for wallet in user_wallets:
+        wallet_name = wallet.get('name', 'Unnamed')
+        is_active = (wallet_name == active_wallet_name)
+        active_marker = "✅ " if is_active else ""
+        
+        # Limit the displayed address to first and last few characters
+        address = wallet.get('address', '')
+        if len(address) > 15:
+            address = f"{address[:8]}...{address[-6:]}"
+        
+        label = f"{active_marker}{wallet_name} ({address})"
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"select_wallet:{wallet_name}")])
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Add a cancel button
+    keyboard.append([InlineKeyboardButton("Cancel", callback_data="cancel_wallet_selection")])
     
+    # Send the message with the inline keyboard
     await update.message.reply_text(
-        "Your wallets:\nSelect a wallet to switch to it:",
-        reply_markup=reply_markup
+        f"You have {len(user_wallets)} wallet(s). Select a wallet to make it active:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     
     return SELECTING_WALLET
 
 async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle wallet selection."""
+    """Process wallet selection."""
     query = update.callback_query
     await query.answer()
     
     user_id = update.effective_user.id
-    selected_wallet_name = query.data.split(':', 1)[1]
-    
-    # Get PIN from pin_manager
     pin = pin_manager.get_pin(user_id)
     
-    # Set the selected wallet as active
-    if db.set_active_wallet(user_id, selected_wallet_name):
-        # Get the newly activated wallet
-        wallet = db.get_user_wallet(user_id, selected_wallet_name, pin)
-        
-        if wallet:
-            await query.edit_message_text(
-                f"Switched to wallet: {selected_wallet_name}\n"
-                f"Address: `{wallet['address']}`",
-                parse_mode='Markdown'
-            )
-        else:
-            await query.edit_message_text(f"Switched to wallet '{selected_wallet_name}' but could not retrieve wallet details.")
+    # Extract the selected wallet name from callback data
+    callback_data = query.data
+    
+    if callback_data == "cancel_wallet_selection":
+        await query.edit_message_text("Wallet selection canceled.")
+        return ConversationHandler.END
+    
+    # Format: "select_wallet:WalletName"
+    selected_wallet_name = callback_data.split(":", 1)[1]
+    
+    # Verify the wallet exists
+    wallet = get_user_wallet(user_id, selected_wallet_name, pin)
+    
+    if not wallet:
+        await query.edit_message_text(f"Error: Wallet '{selected_wallet_name}' not found.")
+        return ConversationHandler.END
+    
+    # Set the wallet as active
+    success = set_active_wallet(user_id, selected_wallet_name)
+    
+    if success:
+        address = wallet.get('address', '')
+        if len(address) > 20:
+            address = f"{address[:10]}...{address[-10:]}"
+            
+        await query.edit_message_text(
+            f"✅ Wallet '{selected_wallet_name}' is now active.\n\n"
+            f"Address: `{address}`\n\n"
+            f"Use /wallet to see details or /send to send funds.",
+            parse_mode='Markdown'
+        )
     else:
-        await query.edit_message_text(f"Error: Could not switch to wallet '{selected_wallet_name}'. It may have been deleted.")
+        await query.edit_message_text(
+            f"Error setting '{selected_wallet_name}' as active wallet. Please try again."
+        )
     
     return ConversationHandler.END 

@@ -1,7 +1,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 import db
-from db.wallet import get_active_wallet_name
+from services.wallet import get_active_wallet_name, get_user_wallet
 from services.pin import pin_manager
 import logging
 import traceback
@@ -18,7 +18,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     pin = pin_manager.get_pin(user_id)
     
     # Check if the user has a wallet
-    has_wallet = db.get_user_wallet(user_id, wallet_name, pin) is not None
+    has_wallet = get_user_wallet(user_id, wallet_name, pin) is not None
     
     # Use plain text without Markdown for safer rendering
     help_text = (
@@ -41,6 +41,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
         "/receive - Show your wallet address for receiving funds\n\n"
+        
+        "Token Tracking:\n"
+        "/track - Track a token's balance over time\n"
+        "/track_view - View your tracked token balances and history\n"
+        "/track_stop - Stop tracking a token\n\n"
         
         "Other:\n"
         "/help - Show this help message\n"
@@ -85,6 +90,11 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
         "/receive - Show your wallet address for receiving funds\n\n"
+        
+        "Token Tracking:\n"
+        "/track - Track a token's balance over time\n"
+        "/track_view - View your tracked token balances and history\n"
+        "/track_stop - Stop tracking a token\n\n"
         
         "Other:\n"
         "/help - Show this help message\n"

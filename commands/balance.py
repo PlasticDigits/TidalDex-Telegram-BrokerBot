@@ -1,81 +1,85 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 import db
-from db.wallet import get_active_wallet_name
-import wallet
-from utils import token
-from wallet.utils import validate_address
-from utils.status_updates import create_status_callback
+from services.wallet import get_active_wallet_name, get_user_wallet, get_wallet_balance
 from services.pin import pin_manager
-from services.pin.pin_decorators import require_pin
 import logging
+from web3 import Web3
+import traceback
+import json
+import requests
+from utils.config import BSC_RPC_URL
 
-# Enable logging
+# Configure module logger
 logger = logging.getLogger(__name__)
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show BNB and token balances with real-time status updates."""
+    """Display wallet balance."""
     user_id = update.effective_user.id
-    
-    # Get active wallet and PIN from pin_manager
     wallet_name = get_active_wallet_name(user_id)
     pin = pin_manager.get_pin(user_id)
-    user_wallet = db.get_user_wallet(user_id, wallet_name, pin)
+    
+    user_wallet = get_user_wallet(user_id, wallet_name, pin)
     
     if not user_wallet:
-        await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
+        await update.message.reply_text(
+            "You don't have an active wallet. Use /wallet to create one."
+        )
         return
     
-    address = user_wallet['address']
-    
-    # Initial response with loading indicator
-    response = await update.message.reply_text("💰 Fetching your wallet balances... ⏳")
-    
-    # Create a status callback using the utility function
-    status_callback = create_status_callback(response, max_lines=15, header_lines=3)
+    wallet_address = user_wallet['address']
+    await update.message.reply_text(f"Fetching balance for {wallet_name}...")
     
     try:
-        # Validate the address
-        try:
-            valid_address = validate_address(address)
-        except ValueError as e:
-            logger.error(f"Invalid wallet address: {e}")
-            await response.edit_text(f"Error: Invalid wallet address. Please recreate your wallet using /wallet.")
-            return
+        # Connect to BSC
+        w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
         
-        balances_text = "💰 Your wallet balances:\n\n"
+        # Get BNB balance
+        balance_wei = await get_wallet_balance(wallet_address)
+        balance_bnb = w3.from_wei(balance_wei, 'ether')
         
-        # Get BNB balance with status updates
-        await status_callback("Fetching BNB balance...")
+        # Format with comma separators and fixed decimal places
+        formatted_balance = f"{balance_bnb:,.4f}"
+        
+        # Try to get USD price
         try:
-            bnb_balance = await wallet.get_bnb_balance(valid_address, status_callback=status_callback)
-            balances_text += f"BNB: {bnb_balance}\n\n"
+            price_response = requests.get('https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT')
+            if price_response.status_code == 200:
+                price_data = price_response.json()
+                bnb_price = float(price_data['price'])
+                usd_value = balance_bnb * bnb_price
+                formatted_usd = f"${usd_value:,.2f}"
+                
+                await update.message.reply_text(
+                    f"🔍 Wallet: {wallet_name}\n"
+                    f"📬 Address: `{wallet_address}`\n\n"
+                    f"💰 Balance: {formatted_balance} BNB\n"
+                    f"💵 Value: {formatted_usd} USD\n\n"
+                    f"Use /send to transfer funds.",
+                    parse_mode='Markdown'
+                )
+            else:
+                # No price data available
+                await update.message.reply_text(
+                    f"🔍 Wallet: {wallet_name}\n"
+                    f"📬 Address: `{wallet_address}`\n\n"
+                    f"💰 Balance: {formatted_balance} BNB\n\n"
+                    f"Use /send to transfer funds.",
+                    parse_mode='Markdown'
+                )
         except Exception as e:
-            logger.error(f"Error getting BNB balance: {e}")
-            balances_text += f"BNB: Error fetching balance\n\n"
-        
-        # Get token balances for popular tokens
-        popular_tokens = token.get_token_list()
-        
-        token_balances = []
-        for token_item in popular_tokens:
-            try:
-                await status_callback(f"Fetching {token_item['symbol']} balance...")
-                token_info = await wallet.get_token_balance(token_item['address'], valid_address, status_callback=status_callback)
-                if token_info['balance'] > 0:
-                    token_balances.append(f"{token_info['symbol']}: {token_info['balance']}")
-            except Exception as e:
-                logger.error(f"Error getting balance for {token_item['symbol']}: {e}")
-        
-        # Add token balances to response
-        if token_balances:
-            balances_text += '\n'.join(token_balances)
-        else:
-            balances_text += "No token balances found."
-        
-        # Show final result
-        await response.edit_text(balances_text)
-        
+            # Error getting price data
+            logger.error(f"Error getting BNB price: {e}")
+            await update.message.reply_text(
+                f"🔍 Wallet: {wallet_name}\n"
+                f"📬 Address: `{wallet_address}`\n\n"
+                f"💰 Balance: {formatted_balance} BNB\n\n"
+                f"Use /send to transfer funds.",
+                parse_mode='Markdown'
+            )
     except Exception as e:
-        logger.error(f"Unexpected error in balance command: {e}")
-        await response.edit_text(f"An error occurred while fetching your balances. Please try again later.\n\nError: {str(e)}") 
+        logger.error(f"Error in balance command: {e}")
+        logger.error(traceback.format_exc())
+        await update.message.reply_text(
+            "Error retrieving wallet balance. Please try again later."
+        ) 

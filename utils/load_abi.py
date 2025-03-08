@@ -1,6 +1,7 @@
 import os
 import json
 
+
 def load_abi(abi_name):
     """
     Load an ABI from the ABI directory
@@ -33,3 +34,5 @@ def load_abi(abi_name):
     # Load and return the ABI
     with open(abi_file_path, 'r') as f:
         return json.load(f) 
+
+ERC20_ABI = load_abi("ERC20")

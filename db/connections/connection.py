@@ -191,12 +191,51 @@ def init_db():
             last_attempt_time INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
+        
+        -- Tokens table for storing token information
+        CREATE TABLE IF NOT EXISTS tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_address TEXT NOT NULL,
+            token_symbol TEXT,
+            token_name TEXT,
+            token_decimals INTEGER DEFAULT 18,
+            chain_id INTEGER DEFAULT 56,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(token_address, chain_id)
+        );
+        
+        -- User tracked tokens table for tracking which tokens a user wants to monitor
+        CREATE TABLE IF NOT EXISTS user_tracked_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            token_id INTEGER NOT NULL,
+            tracked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+            UNIQUE(user_id, token_id)
+        );
+        
+        -- User balances table for storing historical token balances (append-only)
+        CREATE TABLE IF NOT EXISTS user_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            token_id INTEGER NOT NULL,
+            balance TEXT NOT NULL,  -- Stored as string to handle large numbers
+            balance_usd REAL,       -- USD value at time of snapshot, if available
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
+        );
     '''
     
     # Adjust SQL syntax for PostgreSQL if needed
     if DB_TYPE == 'postgresql':
         # Replace SQLite-specific keywords with PostgreSQL equivalents
         init_script = init_script.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
+        init_script = init_script.replace('INSERT OR IGNORE', 'INSERT')
+        init_script = init_script.replace('NOT IN (SELECT token_address FROM tokens)', 
+                                        'NOT IN (SELECT token_address FROM tokens) ON CONFLICT DO NOTHING')
         
     if DB_TYPE == 'sqlite3':
         return db_module.init_db(DB_PATH, init_script)

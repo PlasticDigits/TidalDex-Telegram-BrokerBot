@@ -68,12 +68,16 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from commands.wallet import wallet_command
         from commands.backup import backup_command
         from commands.export_key import export_key_command
+        from commands.addwallet import addwallet_command
+        from commands.send import send_command
         
         # Map of command names to handlers
         command_handlers = {
             'wallet_command': wallet_command,
             'backup_command': backup_command,
-            'export_key_command': export_key_command
+            'export_key_command': export_key_command,
+            'send_command': send_command,
+            'addwallet_command': addwallet_command
             # Add more command handlers as needed
         }
         

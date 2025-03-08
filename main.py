@@ -3,6 +3,7 @@ import logging
 import sys
 import atexit
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
+from telegram import Update
 import traceback
 
 from warnings import filterwarnings
@@ -19,10 +20,12 @@ from utils.self_destruction_message import (
 from services.pin import handle_pin_input
 # Import restructured database module
 import db
+# Import balance tracking utilities
+from utils.balance_tracker import setup_periodic_balance_updates
 
 # Import command handlers from commands package
 from commands.start import start
-from commands.wallet import pin_protected_wallet
+from commands.wallet import wallet_command
 from commands.balance import balance_command
 from commands.receive import receive_command
 from commands.send import (
@@ -55,6 +58,10 @@ from commands.set_pin import (
     set_pin_command, process_pin, confirm_pin, process_current_pin,
     ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN
 )
+# Import track-related commands
+from commands.track import track_conv_handler
+from commands.track_stop import track_stop_conv_handler
+from commands.track_view import track_view_conv_handler
 
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -112,24 +119,26 @@ def main() -> None:
     
     # Create private chat wrappers for all command handlers
     start_wrapper = create_private_chat_wrapper(start)
-    wallet_wrapper = create_private_chat_wrapper(pin_protected_wallet)
+    wallet_wrapper = create_private_chat_wrapper(wallet_command)
     balance_wrapper = create_private_chat_wrapper(balance_command)
     receive_wrapper = create_private_chat_wrapper(receive_command)
-    send_wrapper = create_private_chat_wrapper(pin_protected_send)
-    backup_wrapper = create_private_chat_wrapper(pin_protected_backup)
-    recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
     wallets_wrapper = create_private_chat_wrapper(wallets_command)
-    addwallet_wrapper = create_private_chat_wrapper(pin_protected_addwallet)
-    export_key_wrapper = create_private_chat_wrapper(pin_protected_export_key)
     set_pin_wrapper = create_private_chat_wrapper(set_pin_command)
     rename_wallet_wrapper = create_private_chat_wrapper(rename_wallet_command)
     lock_wrapper = create_private_chat_wrapper(lock_command)
 
-    # Add command handlers
+    # private chat wrappers for pin protected commands
+    addwallet_wrapper = create_private_chat_wrapper(pin_protected_addwallet)
+    export_key_wrapper = create_private_chat_wrapper(pin_protected_export_key)
+    send_wrapper = create_private_chat_wrapper(pin_protected_send)
+    backup_wrapper = create_private_chat_wrapper(pin_protected_backup)
+    recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
+
+    # Add command handlers for public commands
     application.add_handler(CommandHandler("start", start_wrapper))
     application.add_handler(CommandHandler("help", universal_help_command))
     
-    # Add handlers for wallet management
+    # Add handlers for private commands
     application.add_handler(CommandHandler("wallet", wallet_wrapper))
     application.add_handler(CommandHandler("balance", balance_wrapper))
     application.add_handler(CommandHandler("receive", receive_wrapper))
@@ -137,12 +146,13 @@ def main() -> None:
     application.add_handler(CommandHandler("export_key", export_key_wrapper))
     application.add_handler(CommandHandler("rename", rename_wallet_wrapper))
     application.add_handler(CommandHandler("lock", lock_wrapper))
-    
+
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("wallets", wallets_wrapper)],
         states={
-            SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^wallet:')],
+            #regex should match select_wallet:wallet_name and cancel_wallet_selection
+            SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^(select_wallet:.*|cancel_wallet_selection)$')],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
@@ -152,12 +162,19 @@ def main() -> None:
     addwallet_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("addwallet", addwallet_wrapper)],
         states={
-            ADD_CHOOSING_ACTION: [CallbackQueryHandler(action_choice_callback)],
-            ENTERING_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_wallet_name)],
-            ENTERING_PRIVATE_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_process_private_key)],
+            ADD_CHOOSING_ACTION: [
+                CallbackQueryHandler(action_choice_callback, pattern='^(create_wallet|import_wallet)$')
+            ],
+            ENTERING_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_wallet_name)
+            ],
+            ENTERING_PRIVATE_KEY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_process_private_key)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        name="addwallet_conversation",
+        persistent=False
     )
     
     # Add conversation handler for sending funds
@@ -171,8 +188,7 @@ def main() -> None:
             SEND_TOKEN_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_token_amount)],
             SEND_TOKEN_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_token_address)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
     
     # Add conversation handler for wallet recovery
@@ -184,8 +200,7 @@ def main() -> None:
             WAITING_FOR_MNEMONIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_mnemonic)],
             RECOVERY_ENTERING_WALLET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recovery_process_wallet_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
     
     # Add conversation handler for renaming wallet
@@ -194,8 +209,7 @@ def main() -> None:
         states={
             WAITING_FOR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
     
     # Add conversation handler for setting PIN
@@ -206,8 +220,7 @@ def main() -> None:
             CONFIRMING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_pin)],
             ENTERING_CURRENT_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_current_pin)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
     
     application.add_handler(send_conv_handler)
@@ -216,6 +229,11 @@ def main() -> None:
     application.add_handler(addwallet_conv_handler)
     application.add_handler(rename_wallet_conv_handler)
     application.add_handler(set_pin_conv_handler)
+    
+    # Add token tracking handlers
+    application.add_handler(track_conv_handler)
+    application.add_handler(track_stop_conv_handler)
+    application.add_handler(track_view_conv_handler)
     
     # Add handlers for sensitive message buttons (self-destructing messages)
     logger.info(f"Registering sensitive message button handlers with patterns: '{SHOW_SENSITIVE_INFO}' and '{DELETE_NOW}'")
@@ -234,6 +252,9 @@ def main() -> None:
         handle_pin_input
     ))
     
+    # Setup periodic balance updates for tracked tokens
+    setup_periodic_balance_updates(application)
+    
     # Add error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log the error and send a telegram message to notify the developer."""
@@ -245,6 +266,31 @@ def main() -> None:
             await update.effective_message.reply_text('An error occurred while processing your request.')
     
     application.add_error_handler(error_handler)
+
+    #DEBUGGING
+    # Add this near the end of your main() function, before application.run_polling()
+    async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Debug callback to see if button clicks are being captured."""
+        query = update.callback_query
+        logger.info(f"DEBUG: Received callback with data: {query.data}")
+        
+        # Check if this is one of our wallet buttons
+        if query.data in ['create_wallet', 'import_wallet']:
+            logger.info("This is a wallet creation button!")
+        
+        await query.answer(text=f"Button click detected: {query.data}")
+        
+        # For testing, try to manually trigger the action_choice_callback
+        if query.data in ['create_wallet', 'import_wallet']:
+            from commands.addwallet import action_choice_callback
+            try:
+                logger.info("Manually calling action_choice_callback")
+                await action_choice_callback(update, context)
+            except Exception as e:
+                logger.error(f"Error calling action_choice_callback: {e}")
+                logger.error(traceback.format_exc())
+    # Add this handler AFTER all your conversation handlers
+    application.add_handler(CallbackQueryHandler(debug_callback))
     
     # Start the Bot
     application.run_polling()

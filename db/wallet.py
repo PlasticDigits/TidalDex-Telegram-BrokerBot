@@ -266,6 +266,26 @@ def delete_user_wallet(user_id, wallet_name=None):
         logger.error(f"Error deleting wallet for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
         return False
+    
+def has_user_wallet(user_id, pin=None):
+    """
+    Check if a user has any wallets.
+    
+    Args:
+        user_id: The user ID to check
+        pin (str, optional): Not used, included for API consistency
+        
+    Returns:
+        bool: True if the user has at least one wallet, False otherwise
+    """
+    result = execute_query(
+        "SELECT COUNT(*) as count FROM wallets WHERE user_id = ?",
+        (hash_user_id(user_id),),
+        fetch='one'
+    )
+    
+    # Execute_query returns a dictionary with column names as keys
+    return result and result.get('count', 0) > 0
 
 def get_user_wallets(user_id, pin=None):
     """
@@ -527,4 +547,94 @@ def get_active_wallet_name(user_id):
     except Exception as e:
         logger.error(f"Error getting active wallet name for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
-        return "Default" 
+        return "Default"
+
+def get_wallet_by_name(user_id, wallet_name, pin=None):
+    """
+    Get a wallet by its name for a specific user.
+    
+    Args:
+        user_id: The user ID to get the wallet for
+        wallet_name: The name of the wallet to retrieve
+        pin (str, optional): The PIN to use for decryption
+        
+    Returns:
+        dict: The wallet data or None if not found
+    """
+    # Hash the user ID for database lookup
+    user_id_str = hash_user_id(user_id)
+    
+    try:
+        logger.debug(f"Querying wallet with name {wallet_name} for user: {user_id_str}")
+        result = execute_query(
+            "SELECT * FROM wallets WHERE user_id = ? AND name = ?",
+            (user_id_str, wallet_name),
+            fetch='one'
+        )
+        
+        if not result:
+            logger.debug(f"No wallet found with name {wallet_name} for user: {user_id_str}")
+            return None
+        
+        # If PIN is provided, try to decrypt the private key
+        if pin and 'private_key' in result and result['private_key']:
+            logger.debug(f"Decrypting private key for wallet {wallet_name}")
+            try:
+                decrypted_key = decrypt_data(result['private_key'], pin)
+                result['private_key'] = decrypted_key
+                logger.debug(f"Private key decrypted successfully for wallet {wallet_name}")
+            except Exception as e:
+                logger.error(f"Error decrypting private key for wallet {wallet_name}: {e}")
+                logger.error(traceback.format_exc())
+                # Return wallet anyway, so we can still use the non-encrypted wallet data
+                
+        return dict(result)
+    except Exception as e:
+        logger.error(f"Error getting wallet by name {wallet_name} for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+def get_wallet_by_address(user_id, address, pin=None):
+    """
+    Get a wallet by its blockchain address for a specific user.
+    
+    Args:
+        user_id: The user ID to get the wallet for
+        address: The blockchain address of the wallet
+        pin (str, optional): The PIN to use for decryption
+        
+    Returns:
+        dict: The wallet data or None if not found
+    """
+    # Hash the user ID for database lookup
+    user_id_str = hash_user_id(user_id)
+    
+    try:
+        logger.debug(f"Querying wallet with address {address} for user: {user_id_str}")
+        result = execute_query(
+            "SELECT * FROM wallets WHERE user_id = ? AND address = ?",
+            (user_id_str, address),
+            fetch='one'
+        )
+        
+        if not result:
+            logger.debug(f"No wallet found with address {address} for user: {user_id_str}")
+            return None
+        
+        # If PIN is provided, try to decrypt the private key
+        if pin and 'private_key' in result and result['private_key']:
+            logger.debug(f"Decrypting private key for wallet with address {address}")
+            try:
+                decrypted_key = decrypt_data(result['private_key'], pin)
+                result['private_key'] = decrypted_key
+                logger.debug(f"Private key decrypted successfully for wallet with address {address}")
+            except Exception as e:
+                logger.error(f"Error decrypting private key for wallet with address {address}: {e}")
+                logger.error(traceback.format_exc())
+                # Return wallet anyway, so we can still use the non-encrypted wallet data
+        
+        return dict(result)
+    except Exception as e:
+        logger.error(f"Error getting wallet by address {address} for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return None 

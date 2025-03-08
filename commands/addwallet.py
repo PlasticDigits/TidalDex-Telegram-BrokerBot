@@ -30,25 +30,29 @@ async def addwallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         [InlineKeyboardButton("Import Existing Wallet", callback_data='import_wallet')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     await update.message.reply_text(
         "How would you like to add a wallet?", 
         reply_markup=reply_markup
     )
-    
+
     return CHOOSING_ACTION
 
 async def action_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle wallet creation method choice."""
+    logger.info("Received callback query from user")
     query = update.callback_query
     await query.answer()
+    logger.info("Answered callback query")
     
     user_id = update.effective_user.id
     choice = query.data
-    
+    logger.info(f"User {user_id} chose {choice}")
     # Initialize user temp data
     user_temp_data[user_id] = {'action': choice}
-    
+    logger.info(f"User temp data initialized for user {user_id}")
+
+    logger.info("Editing message text to prompt user for wallet name")
     await query.edit_message_text(
         "Please enter a name for this wallet:\n\n"
         f"• Names must be {MIN_WALLET_NAME_LENGTH}-{MAX_WALLET_NAME_LENGTH} characters long\n"
@@ -56,7 +60,7 @@ async def action_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
         "• Names cannot start or end with spaces\n"
         "• Special characters like \" ' < > ` ; are not allowed"
     )
-    
+    logger.info("Message text edited successfully")
     return ENTERING_NAME
 
 async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
