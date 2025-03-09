@@ -185,8 +185,7 @@ class WalletManager:
             # Get or create mnemonic
             mnemonic = get_user_mnemonic(user_id, pin)
             if not mnemonic:
-                logger.error(f"No mnemonic found for user {user_id}")
-                return None
+                mnemonic = self.create_mnemonic(user_id, pin)
             
             # Get existing wallets to determine the next index
             wallets = db_get_user_wallets(user_id)
@@ -202,11 +201,10 @@ class WalletManager:
             wallet_data = {
                 'address': wallet['address'],
                 'private_key': wallet['private_key'],
-                'path': wallet['path'],
-                'name': wallet_name
+                'path': wallet['path']
             }
             
-            success = db_save_user_wallet(user_id, wallet_data, pin)
+            success = db_save_user_wallet(user_id, wallet_data, wallet_name, pin)
             if not success:
                 logger.error(f"Failed to save wallet for user {user_id}")
                 return None
@@ -256,7 +254,7 @@ class WalletManager:
                 'name': wallet_name
             }
             
-            success = db_save_user_wallet(user_id, wallet_data, pin)
+            success = db_save_user_wallet(user_id, wallet_data, wallet_name, pin)
             if not success:
                 logger.error(f"Failed to save imported wallet for user {user_id}")
                 return None
@@ -272,7 +270,7 @@ class WalletManager:
             logger.error(traceback.format_exc())
             return None
     
-    def rename_wallet(self, user_id: str, old_name: str, new_name: str) -> bool:
+    def rename_wallet(self, user_id: str, old_name: str, new_name: str, pin: Optional[str] = None) -> bool:
         """
         Rename a wallet.
         
@@ -295,7 +293,7 @@ class WalletManager:
             wallet['name'] = new_name
             
             # Save the wallet
-            success = db_save_user_wallet(user_id, wallet)
+            success = db_save_user_wallet(user_id, wallet, new_name, pin)
             if not success:
                 logger.error(f"Failed to save renamed wallet for user {user_id}")
                 return False

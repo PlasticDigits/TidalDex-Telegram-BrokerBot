@@ -14,8 +14,8 @@ import traceback
 logger = logging.getLogger(__name__)
 
 # Callback data prefixes for buttons - MUST MATCH EXACTLY in all functions
-SHOW_SENSITIVE_INFO = "show_sensitive_info:"
-DELETE_NOW = "delete_sensitive_info:"
+SHOW_SENSITIVE_INFO = "self_destruction_message_show:"
+DELETE_NOW = "self_destruction_message_delete:"
 
 # Define a function to create the delete button to ensure consistency
 def create_delete_button(message_id, countdown=None):
@@ -122,19 +122,28 @@ async def show_sensitive_information_with_id(update: Update, context: CallbackCo
     text = sensitive_data.get("text", "No information available.")
     parse_mode = sensitive_data.get("parse_mode")
     countdown_seconds = sensitive_data.get("countdown_seconds", 10)
+
+    keyboard = [
+            [
+                create_delete_button(message_id)
+            ]
+        ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Edit the message to show the sensitive information
     try:
         message = await query.edit_message_text(
             text,
-            parse_mode=parse_mode
+            parse_mode=parse_mode,
+            reply_markup=reply_markup
         )
         
         # Store the sensitive message ID in the context for later access
         context.user_data['sensitive_messages'][message_id]["sensitive_message_id"] = message.message_id
+        context.user_data['sensitive_messages'][message_id]["message"] = message
         
         # Start the countdown to auto-delete
-        await run_countdown(update, context, message_id, message, text, parse_mode, countdown_seconds)
+        await start_countdown(update, context, message_id, message, text, parse_mode, countdown_seconds)
         
     except TelegramError as e:
         logger.error(f"Error showing sensitive information: {e}")
@@ -219,83 +228,69 @@ async def delete_sensitive_information(update: Update, context: CallbackContext)
             except Exception as edit_error:
                 logger.error(f"Failed to edit message: {edit_error}")
 
-async def run_countdown(update: Update, context: CallbackContext, message_id: str, message: Message, text: str, parse_mode: str, countdown_seconds: int):
+async def start_countdown(update: Update, context: CallbackContext, message_id: str, message: Message, text: str, parse_mode: str, countdown_seconds: int):
+    """
+    Start a countdown for a self-destruction message by triggering a job_queue.
+    The job_queue will call run_countdown at the specified interval.
+    """    
+    job_queue = context.job_queue
+    # Pass the message_id as data to the job
+    job_queue.run_repeating(
+        run_countdown, 
+        interval=1, 
+        first=0, 
+        last=countdown_seconds+1,
+        data={"message_id": message_id},  # Pass message_id as data
+        chat_id=update.effective_chat.id,
+        user_id=update.effective_user.id
+    )
+
+async def run_countdown(context: CallbackContext):
     """
     Run a countdown for self-destruction of a message.
-    
-    Args:
-        update: The update containing the message
-        context: The context for the handler
-        message_id: The ID of the message in context storage
-        message: The Telegram message object
-        text: The original message text
-        parse_mode: The parse mode for the message
-        countdown_seconds: The number of seconds for the countdown
     """
-    chat_id = update.effective_chat.id
-    current_message_id = message.message_id
+
+    message_id = context.job.data['message_id']
+    user_data = context.user_data
+
+    message = user_data['sensitive_messages'][message_id]['message']
+    text = context.user_data['sensitive_messages'][message_id]['text']
+    parse_mode = context.user_data['sensitive_messages'][message_id]['parse_mode']
+    countdown_seconds = context.user_data['sensitive_messages'][message_id]['countdown_seconds']
+    # countdown_seconds is decremented at the end of the function
     
-    # Run the countdown
-    for i in range(countdown_seconds, 0, -1):
-        # Check if message was already deleted by user
-        if 'sensitive_messages' not in context.user_data or message_id not in context.user_data['sensitive_messages']:
-            logger.info(f"Message {message_id} already deleted by user, aborting countdown")
-            return
-            
-        # Only update once per second
-        if i <= countdown_seconds:
-            # Update the message with just the countdown text in footer
-            footer_text = f"\n\n⏱️ Auto-deletes in {i} seconds..."
-            
-            try:
-                # Try to update the message text with countdown
-                await message.edit_text(
-                    text + footer_text,
-                    parse_mode=parse_mode
-                )
-            except Exception as e:
-                if "Message to edit not found" in str(e):
-                    logger.info(f"Message {current_message_id} was already deleted manually, aborting countdown")
-                    
-                    # Clean up stored data if it hasn't been cleaned already
-                    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
-                        context.user_data['sensitive_messages'].pop(message_id, None)
-                        logger.info(f"Cleaned up sensitive message data for already deleted message {message_id}")
-                    return
-                else:
-                    logger.warning(f"Failed to update countdown: {e}")
-            
-        # Wait 1 second
-        await asyncio.sleep(1)
-        
-    # Before trying to delete, check if the message was already deleted manually
-    if 'sensitive_messages' not in context.user_data or message_id not in context.user_data['sensitive_messages']:
-        logger.info(f"Message {message_id} already deleted by user, no need to auto-delete")
-        return
+
+    keyboard = [
+        [
+            create_delete_button(message_id)
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Countdown complete, now delete the message
+    footer_text = f"\n\n⏱️ Auto-deletes in {countdown_seconds} seconds..."
+    
     try:
-        # Try to delete using the bot and chat_id/message_id
-        await context.bot.delete_message(chat_id=chat_id, message_id=current_message_id)
-        logger.info(f"Deleted sensitive message {message_id} after countdown")
+        await message.edit_text(
+            text + footer_text,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup
+        )
     except Exception as e:
-        if "Message to delete not found" in str(e):
-            logger.info(f"Message {current_message_id} was already deleted manually")
-        else:
-            logger.error(f"Failed to delete sensitive message: {e}")
-            # Only try to edit if not a "not found" error
-            try:
-                await message.edit_text(
-                    "✅ This information has expired and been deleted.",
-                    parse_mode=None
-                )
-            except Exception as edit_error:
-                logger.error(f"Failed to edit message after deletion failed: {edit_error}")
+        logger.error(f"Error updating countdown: {e}")
     
-    # Clean up stored data if it hasn't been cleaned already
-    if 'sensitive_messages' in context.user_data and message_id in context.user_data['sensitive_messages']:
-        context.user_data['sensitive_messages'].pop(message_id, None)
-        logger.info(f"Cleaned up sensitive message data for message {message_id} after countdown")
+    # if the countdown is over, delete the message
+    if countdown_seconds <= 0:
+        try:
+            await message.delete()
+            # Clean up user_data
+            if message_id in context.user_data['sensitive_messages']:
+                del context.user_data['sensitive_messages'][message_id]
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
+    else:
+        # Decrease countdown
+        context.user_data['sensitive_messages'][message_id]['countdown_seconds'] -= 1
+        countdown_seconds = context.user_data['sensitive_messages'][message_id]['countdown_seconds']
 
 # Register these handlers in main.py:
 """

@@ -38,7 +38,7 @@ from commands.send import (
 )
 from commands.lock import lock_command
 from commands.cancel import cancel
-from commands.recovery import (
+from commands.recover import (
     recovery_choice_callback, process_private_key, 
     process_mnemonic, process_wallet_name as recovery_process_wallet_name,
     pin_protected_recover, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
@@ -142,20 +142,19 @@ def main() -> None:
     application.add_handler(CommandHandler("wallet", wallet_wrapper))
     application.add_handler(CommandHandler("balance", balance_wrapper))
     application.add_handler(CommandHandler("receive", receive_wrapper))
-    application.add_handler(CommandHandler("backup", backup_wrapper))
-    application.add_handler(CommandHandler("export_key", export_key_wrapper))
     application.add_handler(CommandHandler("rename", rename_wallet_wrapper))
     application.add_handler(CommandHandler("lock", lock_wrapper))
+    application.add_handler(CommandHandler("backup", backup_wrapper))
+    application.add_handler(CommandHandler("export_key", export_key_wrapper))
 
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("wallets", wallets_wrapper)],
         states={
             #regex should match select_wallet:wallet_name and cancel_wallet_selection
-            SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^(select_wallet:.*|cancel_wallet_selection)$')],
+            SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^(wallets_.*)$')],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False,
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
     
     # Add conversation handler for adding a new wallet
@@ -163,7 +162,7 @@ def main() -> None:
         entry_points=[CommandHandler("addwallet", addwallet_wrapper)],
         states={
             ADD_CHOOSING_ACTION: [
-                CallbackQueryHandler(action_choice_callback, pattern='^(create_wallet|import_wallet)$')
+                CallbackQueryHandler(action_choice_callback, pattern=r'^(addwallet_.*)$')
             ],
             ENTERING_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, process_wallet_name)
@@ -173,15 +172,14 @@ def main() -> None:
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        name="addwallet_conversation",
-        persistent=False
+        name="addwallet_conversation"
     )
     
     # Add conversation handler for sending funds
     send_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("send", send_wrapper)],
         states={
-            CHOOSING_ACTION: [CallbackQueryHandler(button_callback)],
+            CHOOSING_ACTION: [CallbackQueryHandler(button_callback, pattern=r'^(send_.*)$')],
             SEND_BNB_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_bnb_amount)],
             SEND_BNB_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_bnb_address)],
             SEND_TOKEN_SYMBOL: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_token_symbol)],
@@ -195,7 +193,7 @@ def main() -> None:
     recover_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("recover", recover_wrapper)],
         states={
-            CHOOSING_RECOVERY_TYPE: [CallbackQueryHandler(recovery_choice_callback)],
+            CHOOSING_RECOVERY_TYPE: [CallbackQueryHandler(recovery_choice_callback, pattern=r'^(recover_.*)$')],
             WAITING_FOR_PRIVATE_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_private_key)],
             WAITING_FOR_MNEMONIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_mnemonic)],
             RECOVERY_ENTERING_WALLET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recovery_process_wallet_name)],

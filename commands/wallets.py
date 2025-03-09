@@ -30,7 +30,9 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Create a keyboard with all wallets
     keyboard = []
+    logger.info(f"User wallets: {user_wallets}")
     for wallet in user_wallets:
+        logger.info(f"Wallet: {wallet}")
         wallet_name = wallet.get('name', 'Unnamed')
         is_active = (wallet_name == active_wallet_name)
         active_marker = "✅ " if is_active else ""
@@ -41,10 +43,10 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             address = f"{address[:8]}...{address[-6:]}"
         
         label = f"{active_marker}{wallet_name} ({address})"
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"select_wallet:{wallet_name}")])
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"wallets_select:{wallet_name}")])
     
     # Add a cancel button
-    keyboard.append([InlineKeyboardButton("Cancel", callback_data="cancel_wallet_selection")])
+    keyboard.append([InlineKeyboardButton("Cancel", callback_data="wallets_select_cancel")])
     
     # Send the message with the inline keyboard
     await update.message.reply_text(
@@ -65,11 +67,11 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
     # Extract the selected wallet name from callback data
     callback_data = query.data
     
-    if callback_data == "cancel_wallet_selection":
+    if callback_data == "wallets_select_cancel":
         await query.edit_message_text("Wallet selection canceled.")
         return ConversationHandler.END
     
-    # Format: "select_wallet:WalletName"
+    # Format: "wallets_select:WalletName"
     selected_wallet_name = callback_data.split(":", 1)[1]
     
     # Verify the wallet exists

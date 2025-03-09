@@ -43,7 +43,7 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Send All BNB", callback_data='send_bnb_all')],
                 [InlineKeyboardButton("Send All Token", callback_data='send_token_all')],
-                [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+                [InlineKeyboardButton("❌ Cancel", callback_data='send_cancel')]
             ])
         )
     else:
@@ -51,7 +51,7 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         keyboard = [
             [InlineKeyboardButton("Send BNB", callback_data='send_bnb')],
             [InlineKeyboardButton("Send Token", callback_data='send_token')],
-            [InlineKeyboardButton("❌ Cancel", callback_data='cancel')]
+            [InlineKeyboardButton("❌ Cancel", callback_data='send_cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -69,7 +69,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     choice = query.data
     
-    if choice == 'cancel':
+    if choice == 'send_cancel':
         await query.edit_message_text("Transaction cancelled.")
         return ConversationHandler.END
     
@@ -342,7 +342,7 @@ async def send_token_symbol(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return SEND_TOKEN_SYMBOL
     
-    context.user_data['token_info'] = token_info
+    context.user_data['send_token_info'] = token_info
     
     # Check if we're sending the entire balance
     if context.user_data.get('send_all_token', False):
@@ -369,7 +369,7 @@ async def send_token_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Transaction cancelled.")
         return ConversationHandler.END
     
-    token_info = context.user_data.get('token_info')
+    token_info = context.user_data.get('send_token_info')
     
     # Check if user wants to send all
     if input_text.lower() == "all":
@@ -407,7 +407,7 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Transaction cancelled.")
         return ConversationHandler.END
     
-    token_info = context.user_data.get('token_info')
+    token_info = context.user_data.get('send_token_info')
     
     # Handle sending entire balance case differently
     send_all = context.user_data.get('send_all_token', False)

@@ -177,7 +177,7 @@ def init_db():
             address TEXT NOT NULL,
             private_key TEXT,
             path TEXT,
-            name TEXT DEFAULT 'Default',
+            name TEXT DEFAULT 'Default' NOT NULL,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,

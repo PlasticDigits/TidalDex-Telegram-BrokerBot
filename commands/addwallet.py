@@ -26,8 +26,8 @@ user_temp_data = {}
 async def addwallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the process to add a new wallet."""
     keyboard = [
-        [InlineKeyboardButton("Create New Wallet", callback_data='create_wallet')],
-        [InlineKeyboardButton("Import Existing Wallet", callback_data='import_wallet')]
+        [InlineKeyboardButton("Create New Wallet", callback_data='addwallet_create')],
+        [InlineKeyboardButton("Import Existing Wallet", callback_data='addwallet_import')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -112,7 +112,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_temp_data[user_id]['wallet_name'] = wallet_name
     
     # Process based on action
-    if user_temp_data[user_id]['action'] == 'create_wallet':
+    if user_temp_data[user_id]['action'] == 'addwallet_create':
         try:
             # Check if user already has a mnemonic
             existing_mnemonic = db.get_user_mnemonic(user_id, pin_manager.get_pin(user_id))

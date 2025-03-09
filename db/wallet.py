@@ -102,6 +102,12 @@ def save_user_wallet(user_id, wallet_data, wallet_name="Default", pin=None):
     Returns:
         bool: True if successful, False otherwise
     """
+    # If the user has a pin enabled, require the pin
+    if has_pin(user_id):
+        if not pin:
+            logger.warning(f"User {user_id} has a pin enabled, but no pin was provided")
+            return False
+    
     if not wallet_data or 'address' not in wallet_data:
         logger.warning(f"No wallet data provided for user {user_id}")
         return False

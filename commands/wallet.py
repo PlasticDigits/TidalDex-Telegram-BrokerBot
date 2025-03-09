@@ -6,7 +6,7 @@ import db
 import traceback
 from telegram import Update
 from telegram.ext import ContextTypes
-from services.wallet import get_active_wallet_name, get_user_wallets, create_wallet, has_user_wallet, set_active_wallet, has_user_mnemonic, create_mnemonic
+from services.wallet import get_active_wallet_name, get_user_wallets, create_wallet, has_user_wallet, set_active_wallet, has_user_mnemonic
 from services.pin import pin_manager
 
 # Configure module logger
@@ -60,15 +60,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     else:
         # Create a new wallet for the user
-        try:
-            # check if the user has a mnemonic
-            user_has_mnemonic = has_user_mnemonic(user_id)
-            logger.info(f"User {user_id} has mnemonic: {user_has_mnemonic}")
-            if not user_has_mnemonic:
-                # create a new mnemonic
-                mnemonic = create_mnemonic(user_id, pin)
-                logger.info(f"Created new mnemonic for user {user_id}")
-                
+        try:                
             # Create new wallet with default name
             new_wallet_name = "Default"
             new_wallet = create_wallet(user_id, new_wallet_name, pin)
