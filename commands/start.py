@@ -1,9 +1,12 @@
-from telegram import Update
+from telegram import Update, User
 from telegram.ext import ContextTypes
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a welcome message when the command /start is issued."""
-    user = update.effective_user
+    if not update.effective_user or not update.message:
+        return
+        
+    user: User = update.effective_user
     await update.message.reply_html(
         f"Hi {user.mention_html()}! I'm your TidalDex Wallet Bot.\n\n"
         f"🔑 <b>Wallet Management</b>\n"

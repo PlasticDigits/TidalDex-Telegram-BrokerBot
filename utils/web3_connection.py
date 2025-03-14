@@ -5,7 +5,7 @@ from web3 import Web3
 from utils.config import BSC_RPC_URL
 
 # Initialize web3 connection to BSC
-def get_web3_connection():
+def get_web3_connection() -> Web3:
     """
     Get the shared Web3 connection to BSC.
     
@@ -18,4 +18,4 @@ def get_web3_connection():
     return Web3(Web3.HTTPProvider(BSC_RPC_URL))
 
 # Singleton connection instance
-w3 = get_web3_connection() 
+w3: Web3 = get_web3_connection() 

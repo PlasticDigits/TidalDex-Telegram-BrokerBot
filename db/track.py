@@ -2,61 +2,81 @@
 Database operations for token tracking functionality.
 """
 import logging
+import traceback
+from typing import List, Dict, Any, Optional, Union, Tuple, cast
+from db.connections.connection import QueryResult
 from db.connection import execute_query
+from db.utils import hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-def get_user_tracked_tokens(user_id):
+def get_user_tracked_tokens(user_id: Union[int, str]) -> List[Dict[str, Any]]:
     """
     Get all tokens tracked by a user.
     
     Args:
-        user_id (str): The user ID
+        user_id: The user ID
         
     Returns:
-        list: List of tracked tokens with token info
+        List of tracked tokens with token info
     """
-    return execute_query(
+    user_id_str: str = hash_user_id(user_id) if isinstance(user_id, int) else str(user_id)
+    
+    result: QueryResult = execute_query(
         """
         SELECT utt.id, t.id as token_id, t.token_address, t.token_symbol, t.token_name, t.token_decimals
         FROM user_tracked_tokens utt
         JOIN tokens t ON utt.token_id = t.id
         WHERE utt.user_id = ?
         """,
-        (str(user_id),),
+        (user_id_str,),
         fetch='all'
     )
+    
+    # Ensure we return a list of dictionaries
+    if result is None:
+        return []
+    elif isinstance(result, list):
+        return result
+    else:
+        logger.error(f"Unexpected result type from execute_query: {type(result)}")
+        return []
 
-def get_token_by_address(token_address):
+def get_token_by_address(token_address: str) -> Optional[Dict[str, Any]]:
     """
     Get token information by its address.
     
     Args:
-        token_address (str): The token address
+        token_address: The token address
         
     Returns:
-        dict: Token information or None if not found
+        Token information or None if not found
     """
-    return execute_query(
-        "SELECT id, token_symbol, token_name, token_decimals FROM tokens WHERE token_address = ?",
+    result: QueryResult = execute_query(
+        "SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id FROM tokens WHERE token_address = ?",
         (token_address,),
         fetch='one'
     )
+    
+    if not result or not isinstance(result, dict):
+        return None
+    
+    return result
 
-def get_tracked_token_by_id(tracking_id):
+def get_tracked_token_by_id(tracking_id: int) -> Optional[Dict[str, Any]]:
     """
-    Get detailed information about a tracked token by its tracking ID.
+    Get tracked token information by its ID.
     
     Args:
-        tracking_id (int): The tracking entry ID
+        tracking_id: The tracking ID
         
     Returns:
-        dict: Tracking and token information or None if not found
+        Tracked token information or None if not found
     """
-    return execute_query(
+    result: QueryResult = execute_query(
         """
-        SELECT t.id as token_id, t.token_address, t.token_symbol, t.token_name, t.token_decimals
+        SELECT utt.id, t.id as token_id, t.token_address, t.token_symbol, t.token_name, t.token_decimals
         FROM user_tracked_tokens utt
         JOIN tokens t ON utt.token_id = t.id
         WHERE utt.id = ?
@@ -64,20 +84,25 @@ def get_tracked_token_by_id(tracking_id):
         (tracking_id,),
         fetch='one'
     )
+    
+    if not result or not isinstance(result, dict):
+        return None
+    
+    return result
 
-def add_token(token_address, token_symbol, token_name, token_decimals, chain_id=56):
+def add_token(token_address: str, token_symbol: str, token_name: str, token_decimals: int, chain_id: int = 56) -> Optional[int]:
     """
     Add a new token to the tokens table.
     
     Args:
-        token_address (str): The token address
-        token_symbol (str): The token symbol
-        token_name (str): The token name
-        token_decimals (int): The token decimals
-        chain_id (int): The chain ID (default: 56 for BSC)
+        token_address: The token address
+        token_symbol: The token symbol
+        token_name: The token name
+        token_decimals: The token decimals
+        chain_id: The chain ID (default: 56 for BSC)
         
     Returns:
-        int: The ID of the inserted token or None on failure
+        The ID of the inserted token or None on failure
     """
     try:
         execute_query(
@@ -90,83 +115,85 @@ def add_token(token_address, token_symbol, token_name, token_decimals, chain_id=
         )
         
         # Get the token ID we just inserted
-        token = get_token_by_address(token_address)
+        token: Optional[Dict[str, Any]] = get_token_by_address(token_address)
         return token.get('id') if token else None
     except Exception as e:
         logger.error(f"Error adding token {token_address}: {e}")
         return None
 
-def track_token(user_id, token_id):
+def track_token(user_id: Union[int, str], token_id: int) -> Optional[int]:
     """
-    Start tracking a token for a user.
+    Add a token to a user's tracked tokens.
     
     Args:
-        user_id (str): The user ID
-        token_id (int): The token ID
+        user_id: The user ID
+        token_id: The token ID to track
         
     Returns:
-        int: The ID of the tracking entry or None on failure
+        The ID of the tracking entry or None on failure
     """
+    user_id_str: str = hash_user_id(user_id) if isinstance(user_id, int) else str(user_id)
+    
     try:
-        # Check if user is already tracking this token
-        existing = execute_query(
+        # Check if token is already tracked by this user
+        result: QueryResult = execute_query(
             "SELECT id FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?",
-            (str(user_id), token_id),
+            (user_id_str, token_id),
             fetch='one'
         )
+        
+        existing = None
+        if result and isinstance(result, dict):
+            existing = result
         
         if existing:
+            logger.info(f"Token ID {token_id} is already tracked by user {user_id_str}")
             return existing.get('id')
         
-        # Add to user_tracked_tokens
+        # Insert the tracking entry
         execute_query(
-            """
-            INSERT INTO user_tracked_tokens 
-            (user_id, token_id) 
-            VALUES (?, ?)
-            """,
-            (str(user_id), token_id)
+            "INSERT INTO user_tracked_tokens (user_id, token_id) VALUES (?, ?)",
+            (user_id_str, token_id)
         )
         
-        # Get the tracking ID we just inserted
-        tracking = execute_query(
+        # Get the newly created tracking ID
+        new_tracking_entry: QueryResult = execute_query(
             "SELECT id FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?",
-            (str(user_id), token_id),
+            (user_id_str, token_id),
             fetch='one'
         )
         
-        return tracking.get('id') if tracking else None
+        if not new_tracking_entry or not isinstance(new_tracking_entry, dict):
+            return None
+            
+        return new_tracking_entry.get('id')
     except Exception as e:
-        logger.error(f"Error tracking token {token_id} for user {user_id}: {e}")
+        logger.error(f"Error tracking token {token_id} for user {user_id_str[:8]}...: {e}")
         return None
 
-def stop_tracking_token(tracking_id):
+def stop_tracking_token(tracking_id: int) -> bool:
     """
-    Stop tracking a token for a user.
+    Remove a token from a user's tracked tokens.
     
     Args:
-        tracking_id (int): The tracking entry ID
+        tracking_id: The tracking entry ID
         
     Returns:
-        bool: True if successful, False otherwise
+        True if successful, False otherwise
     """
     try:
-        # Get token info before deleting
-        token_info = execute_query(
-            """
-            SELECT t.token_symbol, t.token_name
-            FROM user_tracked_tokens utt
-            JOIN tokens t ON utt.token_id = t.id
-            WHERE utt.id = ?
-            """,
+        # Get the tracking entry first to confirm it exists
+        tracking = execute_query(
+            "SELECT id FROM user_tracked_tokens WHERE id = ?",
             (tracking_id,),
             fetch='one'
         )
         
-        if not token_info:
+        if not tracking:
+            logger.info(f"Tracking entry {tracking_id} not found")
             return False
         
-        # Remove token from tracked tokens
+        # Delete the tracking entry
         execute_query(
             "DELETE FROM user_tracked_tokens WHERE id = ?",
             (tracking_id,)
@@ -177,82 +204,111 @@ def stop_tracking_token(tracking_id):
         logger.error(f"Error stopping tracking for entry {tracking_id}: {e}")
         return False
 
-def record_token_balance(user_id, token_id, wallet_address, balance):
+def record_token_balance(user_id: Union[int, str], token_id: int, wallet_address: str, balance: int) -> bool:
     """
-    Record a token balance.
+    Record the current balance of a token for a user.
     
     Args:
-        user_id (str): The user ID
-        token_id (int): The token ID
-        wallet_address (str): The wallet address
-        balance (str): The token balance
+        user_id: The user ID
+        token_id: The token ID
+        wallet_address: The wallet address
+        balance: The token balance
         
     Returns:
-        bool: True if successful, False otherwise
+        True if successful, False otherwise
     """
+    user_id_str: str = hash_user_id(user_id) if isinstance(user_id, int) else str(user_id)
+    
     try:
-        # Insert balance record
+        # Insert the balance record
         execute_query(
             """
-            INSERT INTO user_balances 
-            (user_id, wallet_address, token_id, balance) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO token_balances 
+            (user_id, token_id, wallet_address, balance, timestamp) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
-            (str(user_id), wallet_address, token_id, str(balance))
+            (user_id_str, token_id, wallet_address, balance)
         )
         
         return True
     except Exception as e:
-        logger.error(f"Error recording balance for token {token_id} for user {user_id}: {e}")
+        logger.error(f"Error recording balance for token {token_id}, user {user_id_str}: {e}")
         return False
 
-def get_token_balance_history(user_id, token_id, limit=30):
+def get_token_balance_history(user_id: Union[int, str], token_id: int, limit: int = 30) -> List[Dict[str, Any]]:
     """
-    Get historical balance data for a specific token.
+    Get the balance history for a token.
     
     Args:
-        user_id (str): User ID
-        token_id (int): Token ID
-        limit (int): Maximum number of records to return
+        user_id: The user ID
+        token_id: The token ID
+        limit: The maximum number of entries to return
         
     Returns:
-        list: List of balance records with timestamp
+        List of balance entries with timestamps
     """
+    user_id_str: str = hash_user_id(user_id) if isinstance(user_id, int) else str(user_id)
+    
     try:
-        # Get balance history
-        balance_history = execute_query(
+        result: QueryResult = execute_query(
             """
-            SELECT balance, timestamp 
-            FROM user_balances 
+            SELECT id, wallet_address, balance, timestamp 
+            FROM token_balances 
             WHERE user_id = ? AND token_id = ? 
             ORDER BY timestamp DESC 
             LIMIT ?
             """,
-            (str(user_id), token_id, limit),
+            (user_id_str, token_id, limit),
             fetch='all'
         )
         
-        return balance_history
+        # Ensure we return a list of dictionaries
+        if result is None:
+            return []
+        elif isinstance(result, list):
+            return result
+        else:
+            logger.error(f"Unexpected result type from execute_query: {type(result)}")
+            return []
     except Exception as e:
-        logger.error(f"Error getting balance history for user {user_id} token {token_id}: {e}")
+        logger.error(f"Error getting balance history for token {token_id}, user {user_id_str[:8]}...: {e}")
         return []
 
-def get_all_tracked_tokens_with_wallets():
+def get_all_tracked_tokens_with_wallets() -> List[Dict[str, Any]]:
     """
-    Get all tracked tokens across all users with their wallet addresses.
-    Used for periodic updates.
+    Get all tracked tokens with the wallets they belong to.
+    Used for syncing balances with blockchain.
     
     Returns:
-        list: List of tracked tokens with user and wallet info
+        List of tokens with tracking and user wallet data
     """
-    return execute_query(
-        """
-        SELECT utt.user_id, t.id as token_id, t.token_address, t.token_symbol, w.address as wallet_address
-        FROM user_tracked_tokens utt
-        JOIN tokens t ON utt.token_id = t.id
-        JOIN users u ON utt.user_id = u.user_id
-        JOIN wallets w ON utt.user_id = w.user_id
-        WHERE w.is_active = 1
-        """,
-        fetch='all'
-    ) 
+    try:
+        result: QueryResult = execute_query(
+            """
+            SELECT 
+                utt.id as tracking_id, 
+                utt.user_id, 
+                t.id as token_id, 
+                t.token_address, 
+                t.token_symbol,
+                t.chain_id,
+                w.address as wallet_address
+            FROM user_tracked_tokens utt
+            JOIN tokens t ON utt.token_id = t.id
+            JOIN wallets w ON utt.user_id = w.user_id
+            WHERE w.is_active = 1
+            """,
+            fetch='all'
+        )
+        
+        # Ensure we return a list of dictionaries
+        if result is None:
+            return []
+        elif isinstance(result, list):
+            return result
+        else:
+            logger.error(f"Unexpected result type from execute_query: {type(result)}")
+            return []
+    except Exception as e:
+        logger.error(f"Error getting tracked tokens with wallets: {e}")
+        return [] 

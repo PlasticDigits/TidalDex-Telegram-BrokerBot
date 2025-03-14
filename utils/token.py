@@ -1,17 +1,36 @@
-import requests
+from typing import List, Dict, Any, Optional, cast
+import httpx
 from utils.config import get_env_var
 
-def get_token_list():
-    """Fetch token list from the provided URL"""
-    token_list_url = get_env_var('DEFAULT_TOKEN_LIST', 'https://tokens.pancakeswap.finance/pancakeswap-extended.json')
-    response = requests.get(token_list_url)
-    if response.status_code == 200:
-        return response.json().get('tokens', [])
-    return []
+async def get_token_list() -> List[Dict[str, Any]]:
+    """
+    Fetch token list from the provided URL
+    
+    Returns:
+        List[Dict[str, Any]]: List of token dictionaries
+    """    
+    httpxClient = httpx.AsyncClient()
+    try:
+        token_list_url = get_env_var('DEFAULT_TOKEN_LIST', 'https://tokens.pancakeswap.finance/pancakeswap-extended.json')
+        response = await httpxClient.get(token_list_url)
+        if response.status_code == 200:
+            return cast(List[Dict[str, Any]], response.json().get('tokens', []))
+        return []
+    finally:
+        await httpxClient.aclose()
 
-def find_token(symbol=None, address=None):
-    """Find token by symbol or address"""
-    tokens = get_token_list()
+async def find_token(symbol: Optional[str] = None, address: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Find token by symbol or address
+    
+    Args:
+        symbol (Optional[str]): Token symbol to search for
+        address (Optional[str]): Token address to search for
+        
+    Returns:
+        Optional[Dict[str, Any]]: Token info dictionary if found, None otherwise
+    """
+    tokens = await get_token_list()
     
     if symbol:
         symbol = symbol.upper()

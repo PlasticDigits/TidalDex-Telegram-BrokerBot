@@ -1,13 +1,28 @@
+from typing import Any, Callable, Awaitable, Optional, Coroutine
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-async def private_chat_only(update: Update, context: ContextTypes.DEFAULT_TYPE, next_handler):
-    """Check if the chat is private, otherwise redirect to DM."""
-    if update.effective_chat.type != 'private':
+async def private_chat_only(
+    update: Update, 
+    context: ContextTypes.DEFAULT_TYPE, 
+    next_handler: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, Any]]
+) -> Optional[Any]:
+    """
+    Check if the chat is private, otherwise redirect to DM.
+    
+    Args:
+        update: The update object
+        context: The context object
+        next_handler: The handler function to call if the chat is private
+        
+    Returns:
+        Optional[Any]: The result of the next_handler or None if not in a private chat
+    """
+    if update.effective_chat and update.effective_chat.type != 'private':
         bot_username = context.bot.username
         
         # Safely get command from update.message
-        command = "/start"
+        command: str = "/start"
         if hasattr(update, 'message') and update.message and hasattr(update.message, 'text') and update.message.text:
             command = update.message.text.split()[0]
         
@@ -29,15 +44,25 @@ async def private_chat_only(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 )
             except Exception:
                 pass
-        return
+        return None
     
     # If it's a private chat, proceed with the original handler
     return await next_handler(update, context)
 
 # Create wrapper functions for each command handler
-def create_private_chat_wrapper(handler_func):
-    """Factory function to create private chat wrappers for handlers."""
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def create_private_chat_wrapper(
+    handler_func: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, Any]]
+) -> Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, Any]]:
+    """
+    Factory function to create private chat wrappers for handlers.
+    
+    Args:
+        handler_func: The handler function to wrap
+        
+    Returns:
+        Callable: A wrapped handler function that only works in private chats
+    """
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Any:
         # For any handler, first check if it's in a private chat
         # If not, private_chat_only will send the redirect message
         result = await private_chat_only(update, context, handler_func)

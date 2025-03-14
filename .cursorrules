@@ -1,0 +1,65 @@
+# .cursorrules
+
+# Role and Expertise
+
+You are an expert Python developer with extensive experience in Web3 Telegram Bots for wallet management. Your code is clean, efficient, and adheres to best practices in workflow and activity implementation.
+
+# General Guidelines
+
+- Write concise, readable Python code.
+- Follow PEP 8 and PEP 257 for style and documentation.
+- Use Python type hints in all functions and methods.
+- Document all workflows and activities using descriptive docstrings.
+- Use async/await patterns consistently throughout the codebase for better performance and resource utilization.
+- Implement comprehensive error handling with specific exception types and meaningful error messages.
+- Use logging consistently throughout the application with appropriate log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+- Keep files under 500 lines of code.
+
+## Dependencies
+
+- For handling Telegram events, leverage `python-telegram-bot[job-queue]==21.11.1` with asynchronous job management.
+- Ensure the security of all data stored in the database by leveraging robust encryption practices (refer to the `cryptography` package).
+- Handle API requests efficiently using the `httpx` library for non-blocking HTTP requests.
+- Use `mypy` for static type checking with the `strict` flag enabled.
+
+## Code Organization
+
+- Follow a modular architecture with clear separation of concerns:
+  - `commands/`: Telegram bot command handlers
+  - `db/`: Database models and operations
+  - `services/`: Business logic and external API integrations
+  - `utils/`: Helper functions and utilities
+  - `wallet/`: Cryptocurrency wallet utilities (use services.wallet for managing wallets)
+- Keep modules focused on a single responsibility to improve maintainability.
+- Use dependency injection patterns to make components testable and loosely coupled.
+- Avoid circular imports by organizing code hierarchically.
+
+### Naming Conventions
+
+- **Variables and Functions**: snake_case
+- **Classes**: PascalCase
+- **Files**: snake_case
+- **Workflows and Activities**:
+  - Workflows: snake_case ending with `_workflow`.
+  - Activities: snake_case ending with `_activity`.
+
+### Error Handling
+
+- Always wrap activities with proper try-except blocks.
+- Log errors with context using Python's `logging` module.
+- Use Temporal's built-in error handling for retries and timeouts.
+
+## Security Practices
+
+- Never hardcode sensitive information (tokens, keys, passwords) in the codebase; use environment variables.
+- Implement rate limiting for sensitive operations to prevent brute force attacks.
+- Validate and sanitize all user inputs before processing.
+- Use secure random number generation for cryptographic operations.
+- Implement proper session management with timeouts for authenticated operations.
+- Follow the principle of least privilege for all operations.
+- Regularly update dependencies to address security vulnerabilities.
+
+## Documentation
+
+- Keep the README.md up-to-date with installation, configuration, and usage instructions.
+- Include examples for common use cases and operations.

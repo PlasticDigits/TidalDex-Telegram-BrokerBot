@@ -9,14 +9,14 @@ import time
 import traceback
 from contextlib import contextmanager
 from functools import wraps
-
+from typing import Callable
 # Configure module logger
 logger = logging.getLogger(__name__)
 
 # Global connection cache
 _connection = None
 
-def retry_on_db_lock(max_attempts=5, initial_wait=0.1):
+def retry_on_db_lock(max_attempts: int = 5, initial_wait: float = 0.1) -> Callable:
     """
     Decorator to retry a database operation on SQLite database is locked errors.
     

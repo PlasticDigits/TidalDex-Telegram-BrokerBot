@@ -15,13 +15,20 @@ import logging
 import time
 import threading
 import traceback
+from typing import Dict, Any, Optional, Union, Tuple, TypedDict
 from db.pin import has_pin, verify_pin as db_verify_pin, save_user_pin
 from db.mnemonic import get_user_mnemonic, save_user_mnemonic
 from db.wallet import get_user_wallets_with_keys, save_user_wallet
 from db.utils import hash_user_id
 from utils.config import PIN_EXPIRATION_TIME
-
+from db.wallet import WalletData
 logger = logging.getLogger(__name__)
+
+# Define a TypedDict for the pin_store structure
+class PinData(TypedDict):
+    pin: str
+    timestamp: float
+    expiration: float
 
 class PINManager:
     """
@@ -31,10 +38,12 @@ class PINManager:
     verification, storage, retrieval, and expiration. It provides a clean
     API for other parts of the codebase to interact with.
     """
-    _instance = None
-    _lock = threading.RLock()
+    _instance: Optional['PINManager'] = None
+    _lock: threading.Lock = threading.Lock()
+    _pin_store: Dict[int, PinData] = {}
+    _expiration_time: int = 3600  # 1 hour
     
-    def __new__(cls):
+    def __new__(cls) -> 'PINManager':
         with cls._lock:
             if cls._instance is None:
                 logger.info("Creating PINManager singleton instance")
@@ -42,17 +51,17 @@ class PINManager:
                 cls._instance._initialize()
             return cls._instance
     
-    def _initialize(self):
+    def _initialize(self) -> None:
         """Initialize the PINManager instance."""
-        self._pin_store = {}  # {user_id: {"pin": str, "timestamp": float, "expiration": int}}
-        self._expiration_time = PIN_EXPIRATION_TIME  # Load from config
+        self._pin_store = {}
+        self._expiration_time = 3600  # 1 hour
         logger.info(f"PINManager initialized with expiration time: {self._expiration_time} seconds")
         self._start_cleanup_thread()
         logger.debug("PINManager initialized")
     
-    def _start_cleanup_thread(self):
+    def _start_cleanup_thread(self) -> None:
         """Start a background thread to periodically clean up expired PINs."""
-        def cleanup_thread():
+        def cleanup_thread() -> None:
             logger.info("Starting PIN cleanup background thread")
             while True:
                 try:
@@ -66,7 +75,7 @@ class PINManager:
         thread = threading.Thread(target=cleanup_thread, daemon=True)
         thread.start()
     
-    def needs_pin(self, user_id):
+    def needs_pin(self, user_id: int) -> bool:
         """
         Check if a user has a PIN set and therefore needs PIN verification.
         
@@ -76,9 +85,13 @@ class PINManager:
         Returns:
             bool: True if the user has a PIN set, False otherwise
         """
+        user_id_str: str = hash_user_id(user_id)
+        logger.debug(f"Checking if user {user_id_str} needs PIN")
+        
+        # TODO: Check if the user has a PIN set in the database
         return has_pin(user_id)
     
-    def verify_pin(self, user_id, pin):
+    def verify_pin(self, user_id: int, pin: str) -> bool:
         """
         Verify if a PIN is correct for a user.
         If the PIN is valid, it will also be stored for future use.
@@ -90,7 +103,7 @@ class PINManager:
         Returns:
             bool: True if the PIN is valid, False otherwise
         """
-        user_id_str = hash_user_id(user_id)
+        user_id_str: str = hash_user_id(user_id)
         logger.debug(f"Verifying PIN for user {user_id_str}")
         
         # Don't verify if user doesn't have a PIN
@@ -99,7 +112,7 @@ class PINManager:
             return True
         
         # Verify the PIN using the database function
-        valid = db_verify_pin(user_id, pin)
+        valid: bool = db_verify_pin(user_id, pin)
         
         if valid:
             logger.info(f"PIN verified successfully for user {user_id_str}")
@@ -110,7 +123,7 @@ class PINManager:
             logger.warning(f"Invalid PIN provided for user {user_id_str}")
             return False
     
-    def _store_pin(self, user_id, pin, expiration_time=None):
+    def _store_pin(self, user_id: int, pin: str, expiration_time: Optional[int] = None) -> bool:
         """
         Store a verified PIN for future use.
         
@@ -125,7 +138,7 @@ class PINManager:
         if expiration_time is None:
             expiration_time = self._expiration_time
             
-        user_id_str = hash_user_id(user_id)
+        user_id_str: str = hash_user_id(user_id)
         logger.debug(f"Storing PIN for user {user_id_str}")
         
         with self._lock:
@@ -137,17 +150,17 @@ class PINManager:
         
         return True
     
-    def set_pin(self, user_id, pin):
+    def set_pin(self, user_id: int, pin: str) -> Tuple[bool, Optional[str]]:
         """
         Set a PIN for a user.
         """
         try:
             # Must reencrypt mnemonic and private keys
-            old_pin = None
+            old_pin: Optional[str] = None
             if self.has_pin(user_id):
                 old_pin = self.get_pin(user_id)
-            mnemonic = get_user_mnemonic(user_id, old_pin)
-            wallets_all = get_user_wallets_with_keys(user_id, old_pin)
+            mnemonic: Optional[str] = get_user_mnemonic(user_id, old_pin)
+            wallets_all: Dict[str, WalletData] = get_user_wallets_with_keys(user_id, old_pin)
             
             # Save the PIN first
             save_user_pin(user_id, pin)
@@ -157,9 +170,8 @@ class PINManager:
                 save_user_mnemonic(user_id, mnemonic, pin)
             
             # Save each wallet with the new PIN
-            for wallet in wallets_all:
-                wallet_name = wallet.get('name', 'Default')
-                save_user_wallet(user_id, wallet, wallet_name, pin)
+            for wallet_name, wallet_data in wallets_all.items():
+                save_user_wallet(user_id, dict(wallet_data), wallet_name, pin)
             
             # Store the PIN in the PIN manager
             self._store_pin(user_id, pin)
@@ -170,7 +182,7 @@ class PINManager:
             logger.error(traceback.format_exc())
             return False, str(e)
     
-    def get_pin(self, user_id):
+    def get_pin(self, user_id: int) -> Optional[str]:
         """
         Get a stored PIN if it exists and hasn't expired.
         
@@ -180,12 +192,12 @@ class PINManager:
         Returns:
             str: The stored PIN, or None if not found or expired
         """
-        user_id_str = hash_user_id(user_id)
+        user_id_str: str = hash_user_id(user_id)
         
         with self._lock:
             if user_id in self._pin_store:
-                pin_data = self._pin_store[user_id]
-                current_time = time.time()
+                pin_data: PinData = self._pin_store[user_id]
+                current_time: float = time.time()
                 
                 # Check if the PIN has expired
                 if current_time - pin_data["timestamp"] < pin_data.get("expiration", self._expiration_time):
@@ -199,7 +211,7 @@ class PINManager:
         logger.debug(f"No valid PIN found for user {user_id_str}")
         return None
     
-    def clear_pin(self, user_id):
+    def clear_pin(self, user_id: int) -> bool:
         """
         Clear a stored PIN for a user.
         
@@ -209,7 +221,7 @@ class PINManager:
         Returns:
             bool: True if the PIN was cleared, False if no PIN was found
         """
-        user_id_str = hash_user_id(user_id)
+        user_id_str: str = hash_user_id(user_id)
         logger.debug(f"Clearing PIN for user {user_id_str}")
         
         with self._lock:
@@ -220,22 +232,22 @@ class PINManager:
         
         return False
     
-    def clear_expired_pins(self):
+    def clear_expired_pins(self) -> int:
         """
         Clear all expired PINs from storage.
         
         Returns:
             int: The number of expired PINs that were cleared
         """
-        cleared_count = 0
-        current_time = time.time()
+        cleared_count: int = 0
+        current_time: float = time.time()
         
         with self._lock:
-            user_ids_to_remove = []
+            user_ids_to_remove: list[int] = []
             
             # Identify expired PINs
             for user_id, pin_data in self._pin_store.items():
-                expiration = pin_data.get("expiration", self._expiration_time)
+                expiration: float = pin_data.get("expiration", self._expiration_time)
                 if current_time - pin_data["timestamp"] >= expiration:
                     user_ids_to_remove.append(user_id)
             
@@ -243,7 +255,7 @@ class PINManager:
             for user_id in user_ids_to_remove:
                 del self._pin_store[user_id]
                 cleared_count += 1
-                user_id_str = hash_user_id(user_id)
+                user_id_str: str = hash_user_id(user_id)
                 logger.debug(f"Cleared expired PIN for user {user_id_str}")
         
         if cleared_count > 0:
@@ -251,7 +263,7 @@ class PINManager:
         
         return cleared_count
     
-    def get_pin_count(self):
+    def get_pin_count(self) -> int:
         """
         Get the number of currently stored PINs.
         
@@ -259,13 +271,13 @@ class PINManager:
             int: The number of stored PINs
         """
         with self._lock:
-            return len(self._pin_store)\
+            return len(self._pin_store)
     
-    def has_pin(self, user_id):
+    def has_pin(self, user_id: int) -> bool:
         """
         Check if a user has a PIN set.
         """
         return self.needs_pin(user_id)
 
 # Create and export singleton instance
-pin_manager = PINManager() 
+pin_manager: PINManager = PINManager() 

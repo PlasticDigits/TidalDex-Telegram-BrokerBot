@@ -5,6 +5,7 @@ Provides unified interface for database connections using either SQLite or Postg
 import logging
 import os
 from importlib import import_module
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TypeVar, ContextManager, Generator, cast
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -13,15 +14,25 @@ load_dotenv()
 # Configure module logger
 logger = logging.getLogger(__name__)
 
+# Type definitions
+# Using TypeVar for generic connection types
+T = TypeVar('T')
+F = TypeVar('F', bound=Callable[..., Any])  # TypeVar for decorator functions
+DBConnection = Any  # Could be sqlite3.Connection or psycopg2.connection
+DBCursor = Any  # Could be sqlite3.Cursor or psycopg2.cursor
+QueryResult = Union[List[Dict[str, Any]], Dict[str, Any], int, None]
+DBConnectionGenerator = Generator[DBConnection, None, None]
+
 # Get database configuration from environment variables
-DB_TYPE = os.getenv('DB_TYPE', 'sqlite3').lower()
-DB_NAME = os.getenv('DB_NAME', 'tidaldex.db')
-DB_HOST = os.getenv('DB_HOST', 'localhost')
-DB_PORT = int(os.getenv('DB_PORT', '5432'))
-DB_USER = os.getenv('DB_USER', 'postgres')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
+DB_TYPE: str = os.getenv('DB_TYPE', 'sqlite3').lower()
+DB_NAME: str = os.getenv('DB_NAME', 'tidaldex.db')
+DB_HOST: str = os.getenv('DB_HOST', 'localhost')
+DB_PORT: int = int(os.getenv('DB_PORT', '5432'))
+DB_USER: str = os.getenv('DB_USER', 'postgres')
+DB_PASSWORD: str = os.getenv('DB_PASSWORD', 'postgres')
 
 # Path for SQLite database
+DB_PATH: Optional[str] = None
 if DB_TYPE == 'sqlite3':
     if not os.path.isabs(DB_NAME):
         DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', DB_NAME)
@@ -31,6 +42,7 @@ else:
     DB_PATH = None
 
 # Import the correct database module based on DB_TYPE
+db_module: Any = None
 try:
     if DB_TYPE == 'sqlite3':
         db_module = import_module('db.connections.sqlite3')
@@ -48,12 +60,12 @@ except ImportError as e:
     DB_TYPE = 'sqlite3'
     db_module = import_module('db.connections.sqlite3')
 
-def create_connection():
+def create_connection() -> Optional[DBConnection]:
     """
     Create a database connection.
     
     Returns:
-        Connection: Database connection object or None on error
+        Optional[DBConnection]: Database connection object or None on error
     """
     if DB_TYPE == 'sqlite3':
         return db_module.create_connection(DB_PATH)
@@ -63,12 +75,12 @@ def create_connection():
             return None
         return db_module.get_connection(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
 
-def get_connection():
+def get_connection() -> Optional[DBConnection]:
     """
     Get a database connection, creating it if needed.
     
     Returns:
-        Connection: Database connection object or None on error
+        Optional[DBConnection]: Database connection object or None on error
     """
     if DB_TYPE == 'sqlite3':
         return db_module.get_connection(DB_PATH)
@@ -78,24 +90,24 @@ def get_connection():
             return None
         return db_module.get_connection(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
 
-def close_connection(conn=None):
+def close_connection(conn: Optional[DBConnection] = None) -> bool:
     """
     Close a database connection.
     
     Args:
-        conn (Connection, optional): Connection to close, or the global one if None
+        conn (Optional[DBConnection], optional): Connection to close, or the global one if None
         
     Returns:
         bool: True if successful, False otherwise
     """
-    return db_module.close_connection(conn)
+    return cast(bool, db_module.close_connection(conn))
 
-def get_db_connection():
+def get_db_connection() -> DBConnectionGenerator:
     """
     Context manager for database connections.
     
     Yields:
-        Connection: Database connection object
+        DBConnection: Database connection object
         
     Raises:
         Exception: If database connection fails
@@ -107,27 +119,27 @@ def get_db_connection():
             raise ImportError("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
         yield from db_module.get_db_connection(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
 
-def execute_query(query, params=(), fetch=None):
+def execute_query(query: str, params: Tuple[Any, ...] = (), fetch: Optional[str] = None) -> QueryResult:
     """
-    Execute a SQL query.
+    Execute a SQL query and return the results.
     
     Args:
         query (str): SQL query to execute
-        params (tuple): Query parameters
-        fetch (str): One of 'all', 'one', or None for SELECT queries
+        params (Tuple[Any, ...]): Query parameters
+        fetch (Optional[str]): One of 'all', 'one', or None for SELECT queries
         
     Returns:
-        list|dict|int: Query results or row count
+        QueryResult: Query results or row count
     """
     if DB_TYPE == 'sqlite3':
-        return db_module.execute_query(query, params, fetch, DB_PATH)
+        return cast(QueryResult, db_module.execute_query(query, params, fetch, DB_PATH))
     else:  # postgresql
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return None
-        return db_module.execute_query(query, params, fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
+        return cast(QueryResult, db_module.execute_query(query, params, fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
 
-def test_connection():
+def test_connection() -> bool:
     """
     Test the database connection by executing a simple query.
     
@@ -135,14 +147,14 @@ def test_connection():
         bool: True if successful, False otherwise
     """
     if DB_TYPE == 'sqlite3':
-        return db_module.test_connection(DB_PATH)
+        return cast(bool, db_module.test_connection(DB_PATH))
     else:  # postgresql
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return False
-        return db_module.test_connection(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
+        return cast(bool, db_module.test_connection(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
 
-def init_db():
+def init_db() -> bool:
     """
     Initialize the database by creating tables if they don't exist.
     
@@ -150,7 +162,7 @@ def init_db():
         bool: True if successful, False otherwise
     """
     # SQL script to initialize the database (same for both SQLite and PostgreSQL)
-    init_script = '''
+    init_script: str = '''
         -- Users table
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
@@ -166,7 +178,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS mnemonics (
             user_id TEXT PRIMARY KEY,
             mnemonic TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
         
@@ -179,7 +191,8 @@ def init_db():
             path TEXT,
             name TEXT DEFAULT 'Default' NOT NULL,
             is_active INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            imported BOOLEAN DEFAULT FALSE,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
         );
@@ -200,7 +213,7 @@ def init_db():
             token_name TEXT,
             token_decimals INTEGER DEFAULT 18,
             chain_id INTEGER DEFAULT 56,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
             UNIQUE(token_address, chain_id)
         );
         
@@ -209,7 +222,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             token_id INTEGER NOT NULL,
-            tracked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            tracked_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
             UNIQUE(user_id, token_id)
@@ -223,7 +236,7 @@ def init_db():
             token_id INTEGER NOT NULL,
             balance TEXT NOT NULL,  -- Stored as string to handle large numbers
             balance_usd REAL,       -- USD value at time of snapshot, if available
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            timestamp INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
         );
@@ -238,13 +251,13 @@ def init_db():
                                         'NOT IN (SELECT token_address FROM tokens) ON CONFLICT DO NOTHING')
         
     if DB_TYPE == 'sqlite3':
-        return db_module.init_db(DB_PATH, init_script)
+        return cast(bool, db_module.init_db(DB_PATH, init_script))
     else:  # postgresql
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return False
-        return db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, init_script)
+        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, init_script))
 
 # Make functions from the underlying database module available
-retry_on_db_lock = getattr(db_module, 'retry_on_db_lock', None) if DB_TYPE == 'sqlite3' else None
-retry_on_db_error = getattr(db_module, 'retry_on_db_error', None) if DB_TYPE == 'postgresql' else None 
+retry_on_db_lock: Optional[Callable[[int, float], Callable[[F], F]]] = getattr(db_module, 'retry_on_db_lock', None) if DB_TYPE == 'sqlite3' else None
+retry_on_db_error: Optional[Callable[[int, float], Callable[[F], F]]] = getattr(db_module, 'retry_on_db_error', None) if DB_TYPE == 'postgresql' else None 

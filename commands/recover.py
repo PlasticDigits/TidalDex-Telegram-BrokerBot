@@ -2,50 +2,63 @@
 Wallet recovery and backup commands.
 Provides functionality to restore a wallet from a private key or mnemonic phrase, and backup existing wallet.
 """
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message, User
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
-from db.wallet import get_user_wallet, save_user_wallet, get_user_wallets, get_active_wallet_name
-from db.mnemonic import save_user_mnemonic
-import wallet
-from eth_account import Account
 import logging
+from typing import Dict, List, Any, Optional, Union, Callable, cast, Coroutine
 from services.pin import require_pin, pin_manager
-
+from services.wallet import wallet_manager
+from db.wallet import WalletData
 # Enable logging
 logger = logging.getLogger(__name__)
 
 # Conversation states
-CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY, WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME = range(4)
+CHOOSING_RECOVERY_TYPE, WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME = range(3)
 
 # Store temporary data during conversation
-user_temp_data = {}
+user_temp_data: Dict[int, Dict[str, Any]] = {}
 
 async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the wallet recovery process by asking for recovery method."""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    # Add null check for user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = user.id
+    pin: Optional[str] = pin_manager.get_pin(user_id)
     
-    # Get active wallet name and PIN
-    wallet_name = get_active_wallet_name(user_id)
-    pin = pin_manager.get_pin(user_id)
+    # Get active wallet name - Convert user_id to string
+    wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(str(user_id))
     
     # Initialize user temp data
     user_temp_data[user_id] = {}
     
-    # Check if user already has a wallet
-    user_wallet = get_user_wallet(user_id, wallet_name, pin)
-    warning_text = ""
+    # Check if user already has a wallet - Convert user_id to string
+    user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(str(user_id), wallet_name, pin)
+    warning_text: str = ""
+    # warn user that if they already have a wallet, recovering will delete their existing wallets.
+    # if they have a private key, they can use /addwallet instead.
     if user_wallet:
         warning_text = "⚠️ You already have a wallet. Recovering a different wallet will replace your current one.\n\n"
+        warning_text += "If you have a private key, you can use /addwallet to add a new wallet.\n\n"
+        warning_text += "ATTN: THIS WILL DELETE ALL YOUR WALLETS. Make sure you have a backup of your private keys.\n\n"
     
     # Create keyboard with recovery options
-    keyboard = [
-        [InlineKeyboardButton("Recover with Private Key", callback_data='recover_privatekey')],
-        [InlineKeyboardButton("Recover with Seed Phrase", callback_data='recover_mnemonic')]
+    keyboard: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("Recover with Seed Phrase", callback_data='recover_mnemonic')],
+        [InlineKeyboardButton("Cancel", callback_data='recover_cancel')]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup: InlineKeyboardMarkup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    message = update.message
+    if not message:
+        logger.error("No message found in update")
+        return ConversationHandler.END
+        
+    await message.reply_text(
         f"{warning_text}How would you like to recover your wallet?",
         reply_markup=reply_markup
     )
@@ -55,21 +68,30 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def recovery_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle recovery method choice."""
     query = update.callback_query
+    if not query:
+        logger.error("No callback query found in update")
+        return ConversationHandler.END
+        
     await query.answer()
+
+    if query.data == 'recover_cancel':
+        await query.edit_message_text("Operation cancelled.")
+        return ConversationHandler.END
     
-    user_id = update.effective_user.id
-    choice = query.data
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = user.id
+    query_data = query.data
+    if not query_data:
+        logger.error("No data found in callback query")
+        return ConversationHandler.END
+        
+    choice: str = query_data
     
-    if choice == 'recover_privatekey':
-        user_temp_data[user_id]['recovery_type'] = 'privatekey'
-        await query.edit_message_text(
-            "🔐 Please enter the private key of the wallet you want to recover.\n\n"
-            "⚠️ WARNING: Never share your private key with anyone else!\n"
-            "This bot stores your key encrypted, but you should still be careful."
-        )
-        return WAITING_FOR_PRIVATE_KEY
-    
-    elif choice == 'recover_mnemonic':
+    if choice == 'recover_mnemonic':
         user_temp_data[user_id]['recovery_type'] = 'mnemonic'
         await query.edit_message_text(
             "🔑 Please enter your seed phrase (mnemonic).\n\n"
@@ -81,132 +103,123 @@ async def recovery_choice_callback(update: Update, context: ContextTypes.DEFAULT
     
     return ConversationHandler.END
 
-async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process the private key entered by the user and recover the wallet."""
-    # Delete the user's message containing the private key for security
-    try:
-        await update.message.delete()
-    except Exception:
-        # Couldn't delete message, possibly due to permissions
-        pass
-    
-    user_id = update.effective_user.id
-    private_key = update.message.text.strip()
-    
-    # Ask for wallet name
-    user_temp_data[user_id]['private_key'] = private_key
-    await update.message.reply_text("Please enter a name for this wallet:")
-    return ENTERING_WALLET_NAME
-
 async def process_mnemonic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process the mnemonic phrase entered by the user and recover the wallet."""
     # Delete the user's message containing the mnemonic for security
-    try:
-        await update.message.delete()
-    except Exception:
-        # Couldn't delete message, possibly due to permissions
-        pass
+    message = update.message
+    if message:
+        try:
+            await message.delete()
+        except Exception:
+            # Couldn't delete message, possibly due to permissions
+            pass
     
-    user_id = update.effective_user.id
-    mnemonic = update.message.text.strip()
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = user.id
+    
+    # Check if message is available
+    if not message or not message.text:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="Invalid mnemonic format. Please try again or use /cancel to abort."
+        )
+        return WAITING_FOR_MNEMONIC
+        
+    mnemonic: str = message.text.strip()
     
     # Store the mnemonic for later use
     user_temp_data[user_id]['mnemonic'] = mnemonic
     
     # Ask for wallet name
-    await update.message.reply_text("Please enter a name for this wallet:")
+    await message.reply_text("Please enter a name for this wallet:")
     return ENTERING_WALLET_NAME
 
 async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Process the wallet name and finalize wallet recovery."""
-    user_id = update.effective_user.id
-    wallet_name = update.message.text.strip()
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = user.id
+    
+    # Check if message is available
+    message = update.message
+    if not message or not message.text:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="Invalid wallet name. Please try again or use /cancel to abort."
+        )
+        return ENTERING_WALLET_NAME
+        
+    wallet_name: str = message.text.strip()
+
+    pin: Optional[str] = pin_manager.get_pin(user_id)
     
     # Check if user has temp data
     if user_id not in user_temp_data:
-        await update.message.reply_text("Something went wrong. Please try again with /recover.")
+        await message.reply_text("Something went wrong. Please try again with /recover.")
         return ConversationHandler.END
     
     # Check if name is valid
     if not wallet_name or len(wallet_name) > 32:
-        await update.message.reply_text("Wallet name must be between 1 and 32 characters. Please try again:")
+        await message.reply_text("Wallet name must be between 1 and 32 characters. Please try again:")
         return ENTERING_WALLET_NAME
     
-    # Check if wallet with this name already exists
-    existing_wallets = get_user_wallets(user_id, pin_manager.get_pin(user_id))
+    # Check if wallet with this name already exists - Convert user_id to string
+    user_wallets_dict = wallet_manager.get_user_wallets(str(user_id), pin=pin)
+    existing_wallets: Dict[str, WalletData] = {}
+    
+    # Handle the potential Union type
+    if isinstance(user_wallets_dict, dict):
+        existing_wallets = user_wallets_dict
+    
     if wallet_name in existing_wallets:
-        await update.message.reply_text(f"A wallet with name '{wallet_name}' already exists. Please choose a different name:")
+        await message.reply_text(f"A wallet with name '{wallet_name}' already exists. Please choose a different name:")
         return ENTERING_WALLET_NAME
     
-    recovery_type = user_temp_data[user_id]['recovery_type']
+    recovery_type: str = user_temp_data[user_id]['recovery_type']
     
     try:
-        recovered_wallet = None
         
-        # Process based on recovery type
-        if recovery_type == 'privatekey':
-            private_key = user_temp_data[user_id]['private_key']
-            
-            # Handle '0x' prefix for private key
-            if not private_key.startswith('0x'):
-                private_key = '0x' + private_key
-            
-            # Create account from private key
-            account = Account.from_key(private_key)
-            
-            # Create wallet object
-            recovered_wallet = {
-                'address': account.address,
-                'private_key': private_key
-            }
-        
-        elif recovery_type == 'mnemonic':
-            mnemonic = user_temp_data[user_id]['mnemonic']
-            
-            # Create wallet from mnemonic
-            full_wallet = wallet.create_mnemonic_wallet(mnemonic)
-            
-            # Remove mnemonic from wallet object before saving
-            recovered_wallet = {
-                'address': full_wallet['address'],
-                'private_key': full_wallet['private_key'],
-                'path': full_wallet['path']
-            }
-            
-            # Save mnemonic separately
-            save_user_mnemonic(user_id, mnemonic, pin_manager.get_pin(user_id))
-        
-        # Save the wallet
-        save_user_wallet(user_id, recovered_wallet, wallet_name, pin_manager.get_pin(user_id))
-        
+        if recovery_type == 'mnemonic':
+
+            mnemonic: str = user_temp_data[user_id]['mnemonic']
+
+            # Convert user_id to string
+            wallet_manager.save_user_mnemonic(str(user_id), mnemonic, pin)
+
+            # Convert user_id to string
+            wallet_data = wallet_manager.create_wallet(str(user_id), wallet_name, pin)
+            if not wallet_data:
+                raise ValueError("Failed to create wallet")
+                
+            wallet: WalletData = wallet_data
+                
         # Clean up sensitive data
         del user_temp_data[user_id]
-        
-        # Show success message with appropriate details based on recovery type
-        if recovery_type == 'privatekey':
-            await update.message.reply_text(
-                f"✅ Wallet successfully recovered and saved as '{wallet_name}'!\n\n"
-                f"Address: `{recovered_wallet['address']}`\n\n"
-                "You can now use this wallet for transactions.",
-                parse_mode='Markdown'
-            )
-        else:  # mnemonic
-            await update.message.reply_text(
+
+        if recovery_type == 'mnemonic':
+            await message.reply_text(
                 f"✅ Wallet successfully recovered from seed phrase and saved as '{wallet_name}'!\n\n"
-                f"Address: `{recovered_wallet['address']}`\n\n"
+                f"Address: `{wallet['address']}`\n\n"
                 "You can now use this wallet for transactions.",
-                parse_mode='Markdown'
+                parse_mode=ParseMode.MARKDOWN
             )
         
     except ValueError as e:
-        error_message = str(e)
+        error_message: str = str(e)
         if 'Invalid mnemonic' in error_message:
-            await update.message.reply_text(
+            await message.reply_text(
                 "❌ Invalid seed phrase. Please make sure you've entered the correct 12 or 24 words in the right order.\n\n"
                 "Use /recover to try again."
             )
         else:
-            await update.message.reply_text(
+            await message.reply_text(
                 f"❌ Error recovering wallet: {error_message}\n\n"
                 "Please check your input and try again with /recover."
             )
@@ -220,7 +233,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Wallet recovery error: {str(e)}")
         
         # User-friendly error message
-        await update.message.reply_text(
+        await message.reply_text(
             "❌ Something went wrong while recovering your wallet.\n\n"
             f"Error: {str(e)}\n\n"
             "Please try again with /recover."
@@ -234,16 +247,26 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the current operation and end the conversation."""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = user.id
     
     # Clean up any temporary data
     if user_id in user_temp_data:
         del user_temp_data[user_id]
     
-    await update.message.reply_text("Operation cancelled.")
+    message = update.message
+    if not message:
+        logger.error("No message found in update")
+        return ConversationHandler.END
+        
+    await message.reply_text("Operation cancelled.")
     return ConversationHandler.END 
 
 # Create a PIN-protected version of the command
-pin_protected_recover = require_pin(
+pin_protected_recover: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, int]] = require_pin(
     "🔒 Wallet recovery requires PIN verification.\nPlease enter your PIN:"
 )(recover_command) 

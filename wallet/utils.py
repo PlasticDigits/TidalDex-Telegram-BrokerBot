@@ -3,7 +3,7 @@ Utility functions for the wallet module.
 """
 from utils.web3_connection import w3
 
-def validate_address(address):
+def validate_address(address: str) -> str:
     """
     Validate an Ethereum address and convert it to checksum format.
     

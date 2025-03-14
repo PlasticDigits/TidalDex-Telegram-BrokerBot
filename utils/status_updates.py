@@ -3,8 +3,13 @@ Status update utilities for long-running operations.
 Provides decorators and helper functions for implementing status updates.
 """
 import functools
+from typing import Any, Callable, TypeVar, Optional, Union, cast, Coroutine, Awaitable
 
-def with_status_updates(operation_name=None):
+# Define type variables for generics
+T = TypeVar('T')
+StatusCallback = Callable[[str], Union[None, Awaitable[None]]]
+
+def with_status_updates(operation_name: Optional[str] = None) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator for functions that provide status updates.
     
@@ -12,10 +17,10 @@ def with_status_updates(operation_name=None):
     It wraps the function call with proper begin/end messages and error handling.
     
     Args:
-        operation_name (str, optional): Name of the operation for logging
+        operation_name (Optional[str]): Name of the operation for logging
         
     Returns:
-        function: Decorated function that handles status updates
+        Callable: Decorated function that handles status updates
         
     Example:
         @with_status_updates("Token Transfer")
@@ -24,9 +29,9 @@ def with_status_updates(operation_name=None):
             status_callback("Preparing transaction...")
             # rest of function
     """
-    def decorator(func):
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             # Extract callback if present
             callback = kwargs.get('status_callback')
             
@@ -50,10 +55,15 @@ def with_status_updates(operation_name=None):
                     callback(f"Error in {op_name}: {str(e)}")
                 raise
                 
-        return wrapper
+        return cast(Callable[..., T], wrapper)
     return decorator
 
-def create_status_callback(message_obj, update_method='edit_text', max_lines=15, header_lines=4):
+def create_status_callback(
+    message_obj: Any, 
+    update_method: str = 'edit_text', 
+    max_lines: int = 15, 
+    header_lines: int = 4
+) -> StatusCallback:
     """
     Create a status callback function for use with messaging platforms.
     
@@ -68,7 +78,7 @@ def create_status_callback(message_obj, update_method='edit_text', max_lines=15,
         header_lines (int): Number of header lines to always preserve
         
     Returns:
-        callable: A callback function that can be passed to operations
+        StatusCallback: A callback function that can be passed to operations
         
     Example:
         # In a Telegram bot handler:
@@ -76,7 +86,7 @@ def create_status_callback(message_obj, update_method='edit_text', max_lines=15,
         status_cb = create_status_callback(response)
         result = some_long_operation(status_callback=status_cb)
     """
-    async def callback(message):
+    async def callback(message: str) -> None:
         current_text = getattr(message_obj, 'text', '')
         
         # Keep message at a reasonable length

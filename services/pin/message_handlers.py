@@ -7,13 +7,14 @@ responses.
 """
 import logging
 import traceback
+from typing import Dict, Any, Callable, Awaitable, Optional, List, Union, cast
 from telegram import Update
 from telegram.ext import ContextTypes
 from services.pin.PINManager import pin_manager
 
 logger = logging.getLogger(__name__)
 
-async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle direct PIN input from the user.
     
@@ -29,15 +30,24 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Returns:
         None
     """
-    user_id = update.effective_user.id
-    input_text = update.message.text
+    if not update.effective_user or not update.message or not update.message.text:
+        logger.warning("Missing user or message data in PIN input handler")
+        return
+        
+    user_id: int = update.effective_user.id
+    input_text: str = update.message.text
+    
+    # Check if user_data exists, if not initialize it
+    if context.user_data is None:
+        logger.warning("User data is None in PIN input handler")
+        return
     
     # Check if there's a pending command that requires PIN
     if 'pending_command' not in context.user_data:
         # No pending command, ignore this input
         return
     
-    pending_command = context.user_data['pending_command']
+    pending_command: str = context.user_data['pending_command']
     logger.debug(f"Processing potential PIN input for pending command: {pending_command}")
     
     # First try to delete the PIN message for security
@@ -72,7 +82,7 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from commands.send import send_command
         
         # Map of command names to handlers
-        command_handlers = {
+        command_handlers: Dict[str, Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[Any]]] = {
             'wallet_command': wallet_command,
             'backup_command': backup_command,
             'export_key_command': export_key_command,

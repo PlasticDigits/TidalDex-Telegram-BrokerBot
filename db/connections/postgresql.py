@@ -7,7 +7,7 @@ import traceback
 import time
 from contextlib import contextmanager
 from functools import wraps
-
+from typing import Callable, Any, Dict, List, Optional, Tuple, Union, Generator, cast
 try:
     import psycopg2
     from psycopg2 import pool
@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 # Global connection pool
 _connection_pool = None
 
-def retry_on_db_error(max_attempts=5, initial_wait=0.1, error_classes=(psycopg2.OperationalError,)):
+# Import QueryResult type from local module instead of db
+from db.connections.connection import QueryResult
+
+def retry_on_db_error(max_attempts: int = 5, initial_wait: float = 0.1, error_classes: tuple = (psycopg2.OperationalError,)) -> Callable:
     """
     Decorator to retry a database operation on specific PostgreSQL errors.
     

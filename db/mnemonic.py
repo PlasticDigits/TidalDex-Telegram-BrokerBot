@@ -3,32 +3,37 @@ Database operations for mnemonic seed phrases.
 """
 import logging
 import traceback
+from typing import Optional, Union, Dict, Any, List, Tuple, cast
+from db.connections.connection import QueryResult
 from db.connection import execute_query
 from db.utils import encrypt_data, decrypt_data, hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-def save_user_mnemonic(user_id, mnemonic, pin=None):
+def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[str] = None) -> bool:
     """
     Save a single mnemonic phrase for a specific user.
     
     Args:
         user_id: The user ID to save the mnemonic for
-        mnemonic (str): The mnemonic seed phrase
-        pin (str, optional): PIN to use for encryption
+        mnemonic: The mnemonic seed phrase
+        pin: PIN to use for encryption
         
     Returns:
-        bool: True if successful, False otherwise
+        True if successful, False otherwise
     """
     if not mnemonic:
         logger.warning(f"No mnemonic provided for user {user_id}")
         return False
     
     # Hash the user ID for database storage
-    user_id_str = hash_user_id(user_id)
+    user_id_str: str = hash_user_id(user_id)
     logger.debug(f"Saving mnemonic for hashed user_id: {user_id_str}")
     
-    encrypted_mnemonic = encrypt_data(mnemonic, user_id, pin)
+    encrypted_mnemonic: Optional[str] = encrypt_data(mnemonic, user_id, pin)
+    if not encrypted_mnemonic:
+        logger.error(f"Failed to encrypt mnemonic for user {user_id_str}")
+        return False
 
     # First, create user record if it doesn't exist
     logger.debug(f"Ensuring user {user_id_str} exists in users table")
@@ -47,34 +52,34 @@ def save_user_mnemonic(user_id, mnemonic, pin=None):
     logger.debug(f"Mnemonic saved successfully for user {user_id_str}")
     return True
 
-def get_user_mnemonic(user_id, pin=None):
+def get_user_mnemonic(user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """
     Get the mnemonic phrase for a specific user.
     
     Args:
         user_id: The user ID to get the mnemonic for
-        pin (str, optional): The PIN to use for decryption
+        pin: The PIN to use for decryption
         
     Returns:
-        str: The decrypted mnemonic phrase or None if not found
+        The decrypted mnemonic phrase or None if not found
     """
     # Hash the user ID for database lookup
-    user_id_str = hash_user_id(user_id)
+    user_id_str: str = hash_user_id(user_id)
 
     logger.debug(f"Querying mnemonic for user: {user_id_str}")
-    result = execute_query(
+    result: QueryResult = execute_query(
         "SELECT mnemonic FROM mnemonics WHERE user_id = ?",
         (user_id_str,),
         fetch='one'
     )
         
-    if not result:
+    if not result or not isinstance(result, dict):
         logger.debug(f"No mnemonic found for user: {user_id_str}")
         return None
         
     # Decrypt and return the mnemonic
     logger.debug(f"Attempting to decrypt mnemonic for user {user_id_str}")
-    mnemonic = decrypt_data(result['mnemonic'], user_id, pin)
+    mnemonic: Optional[str] = decrypt_data(result['mnemonic'], user_id, pin)
     
     if mnemonic:
         logger.debug(f"Successfully decrypted mnemonic for user {user_id_str}")
@@ -83,7 +88,7 @@ def get_user_mnemonic(user_id, pin=None):
     
     return mnemonic
 
-def delete_user_mnemonic(user_id):
+def delete_user_mnemonic(user_id: Union[int, str]) -> bool:
     """
     Delete the mnemonic phrase for a specific user.
     
@@ -91,10 +96,10 @@ def delete_user_mnemonic(user_id):
         user_id: The user ID to delete the mnemonic for
         
     Returns:
-        bool: True if successful, False otherwise
+        True if successful, False otherwise
     """
     # Hash the user ID for database operations
-    user_id_str = hash_user_id(user_id)
+    user_id_str: str = hash_user_id(user_id)
     
     try:
         execute_query(

@@ -7,3 +7,4 @@ wallets.db*
 bot.log
 data/tidaldex.db
 data/tidaldex.db*
+.mypy_cache/

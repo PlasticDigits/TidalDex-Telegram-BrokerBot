@@ -6,9 +6,10 @@ import json
 import os
 from web3 import Web3
 from web3.exceptions import BadFunctionCallOutput, ContractLogicError
-import requests
+import httpx
 from utils.config import BSC_RPC_URL, DEFAULT_TOKEN_LIST
 from utils.load_abi import ERC20_ABI
+from typing import Dict, Union, Any, Optional
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -17,11 +18,11 @@ logger = logging.getLogger(__name__)
 w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
 
 # Token cache for faster lookups
-_token_cache = {}
+_token_cache: Dict[str, Dict[str, Union[str, int]]] = {}
 
 
 
-async def validate_token_address(token_address):
+async def validate_token_address(token_address: str) -> bool:
     """
     Validates if a given address is a valid ERC-20 token.
     
@@ -53,7 +54,7 @@ async def validate_token_address(token_address):
         logger.error(f"Error validating token {token_address}: {e}")
         return False
 
-async def get_token_info(token_address):
+async def get_token_info(token_address: str) -> Optional[Dict[str, Any]]:
     """
     Gets token information like symbol, name and decimals.
     
@@ -69,6 +70,8 @@ async def get_token_info(token_address):
         
     # Convert to checksum address
     token_address = Web3.to_checksum_address(token_address)
+
+    httpxClient = httpx.AsyncClient()
     
     # Check cache first
     if token_address in _token_cache:
@@ -105,7 +108,7 @@ async def get_token_info(token_address):
         
         # Try getting info from default token list
         try:
-            token_list_response = requests.get(DEFAULT_TOKEN_LIST)
+            token_list_response = await httpxClient.get(DEFAULT_TOKEN_LIST)
             if token_list_response.status_code == 200:
                 token_list = token_list_response.json()
                 
@@ -127,7 +130,7 @@ async def get_token_info(token_address):
         
         return None
 
-async def get_token_balance(wallet_address, token_address):
+async def get_token_balance(wallet_address: str, token_address: str) -> int:
     """
     Gets the balance of a specific token for a wallet.
     
@@ -150,13 +153,14 @@ async def get_token_balance(wallet_address, token_address):
         contract = w3.eth.contract(address=token_address, abi=ERC20_ABI)
         
         # Get token balance
-        balance = contract.functions.balanceOf(wallet_address).call()
+        balance = int(contract.functions.balanceOf(wallet_address).call())
+        
         return balance
     except Exception as e:
         logger.error(f"Error getting token balance for {wallet_address} ({token_address}): {e}")
         return 0
 
-def format_token_balance(balance, decimals=18):
+def format_token_balance(balance: int, decimals: int = 18) -> str:
     """
     Formats a raw token balance with proper decimal places.
     

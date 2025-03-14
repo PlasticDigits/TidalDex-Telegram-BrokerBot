@@ -2,12 +2,12 @@
 Command for renaming a wallet.
 """
 import logging
-from telegram import Update
+from telegram import Update, Message, User
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
-import db
-from services.wallet import get_active_wallet_name, get_user_wallet, rename_wallet
+from typing import Dict, Any, Optional, cast
+from services.wallet import wallet_manager
 from services.pin import pin_manager
-
+from db.wallet import WalletData
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -19,30 +19,41 @@ async def rename_wallet_command(update: Update, context: ContextTypes.DEFAULT_TY
     Start the process of renaming a wallet.
     Ask the user for a new wallet name.
     """
-    user_id = update.effective_user.id
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id_int: int = user.id
+    user_id_str: str = str(user_id_int)
     
-    # Get the PIN from the manager
-    pin = pin_manager.get_pin(user_id)
+    # Get the PIN from the manager - PIN manager expects int
+    pin: Optional[str] = pin_manager.get_pin(user_id_int)
     
-    # Get the active wallet name
-    wallet_name = get_active_wallet_name(user_id)
+    # Get the active wallet name - Wallet manager expects str
+    wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(user_id_str)
     
-    # Check if there's an active wallet
-    user_wallet = get_user_wallet(user_id, wallet_name, pin)
+    # Check if there's an active wallet - Wallet manager expects str
+    user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(user_id_str, wallet_name, pin)
     
+    message = update.message
+    if not message:
+        logger.error("No message found in update")
+        return ConversationHandler.END
+        
     if not user_wallet:
-        await update.message.reply_text(
+        await message.reply_text(
             "You don't have an active wallet to rename.\n"
             "Use /wallet to create one first."
         )
         return ConversationHandler.END
     
     # Store the current wallet name in user_data
-    if not context.user_data:
+    if context.user_data is None:
         context.user_data = {}
     context.user_data['current_wallet_name'] = wallet_name
     
-    await update.message.reply_text(
+    await message.reply_text(
         f"Current wallet name: {wallet_name}\n\n"
         "Please enter a new name for your wallet:"
     )
@@ -53,40 +64,66 @@ async def process_new_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """
     Process the new wallet name entered by the user.
     """
-    user_id = update.effective_user.id
-    new_name = update.message.text.strip()
+    user = update.effective_user
+    if not user:
+        logger.error("No user found in update")
+        return ConversationHandler.END
+        
+    user_id_int: int = user.id
+    user_id_str: str = str(user_id_int)
+    
+    # Check if message is available
+    if not update.message or not update.message.text:
+        await context.bot.send_message(
+            chat_id=user_id_int,  # Using int for telegram API
+            text="Invalid input. Please enter a valid wallet name or use /cancel to abort."
+        )
+        return WAITING_FOR_NAME
+        
+    new_name: str = update.message.text.strip()
     
     # Validate the new name
     if not new_name or len(new_name) > 20:
-        await update.message.reply_text(
+        message = update.message
+        await message.reply_text(
             "Invalid wallet name. Please enter a name between 1 and 20 characters."
         )
         return WAITING_FOR_NAME
     
     # Get the current wallet name from context
-    current_wallet_name = context.user_data.get('current_wallet_name')
+    if context.user_data is None:
+        message =update.message
+        await message.reply_text(
+            "Error: User data not available.\n"
+            "Please try the rename command again."
+        )
+        return ConversationHandler.END
+        
+    current_wallet_name: Optional[str] = context.user_data.get('current_wallet_name')
     if not current_wallet_name:
-        await update.message.reply_text(
+        message = update.message
+        await message.reply_text(
             "Error: Could not retrieve current wallet name.\n"
             "Please try the rename command again."
         )
         return ConversationHandler.END
     
-    # Rename the wallet
-    success = rename_wallet(user_id, current_wallet_name, new_name)
+    # Rename the wallet - Wallet manager expects str
+    success: bool = wallet_manager.rename_wallet(user_id_str, current_wallet_name, new_name)
     
+    message = update.message
     if success:
-        await update.message.reply_text(
+        await message.reply_text(
             f"✅ Wallet successfully renamed from '{current_wallet_name}' to '{new_name}'."
         )
     else:
-        await update.message.reply_text(
+        await message.reply_text(
             f"❌ Failed to rename wallet from '{current_wallet_name}' to '{new_name}'.\n"
             "Please try again later."
         )
     
     # Clear the stored wallet name
-    if 'current_wallet_name' in context.user_data:
+    if context.user_data is not None and 'current_wallet_name' in context.user_data:
         del context.user_data['current_wallet_name']
     
     return ConversationHandler.END
@@ -96,17 +133,19 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     Cancel the wallet renaming process.
     """
     # Clear any stored data
-    if context.user_data and 'current_wallet_name' in context.user_data:
+    if context.user_data is not None and 'current_wallet_name' in context.user_data:
         del context.user_data['current_wallet_name']
     
-    await update.message.reply_text(
-        "Wallet renaming canceled."
-    )
+    message = update.message
+    if message:
+        await message.reply_text(
+            "Wallet renaming canceled."
+        )
     
     return ConversationHandler.END
 
 # Create the conversation handler
-rename_wallet_conv_handler = ConversationHandler(
+rename_wallet_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("rename_wallet", rename_wallet_command)],
     states={
         WAITING_FOR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_name)],

@@ -1,27 +1,33 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-import db
-from services.wallet import get_active_wallet_name, get_user_wallet
+from typing import Optional
+from services.wallet import get_active_wallet_name, has_user_wallet
 from services.pin import pin_manager
 import logging
-import traceback
+from db.wallet import WalletData
 
 # Enable logging
 logger = logging.getLogger(__name__)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show help information."""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    
+    if user is None:
+        logger.error("Failed to get effective user from update")
+        return
+        
+    user_id: int = user.id
     
     # Get active wallet name and PIN
-    wallet_name = get_active_wallet_name(user_id)
-    pin = pin_manager.get_pin(user_id)
+    wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
+    pin: Optional[str] = pin_manager.get_pin(user_id)
     
     # Check if the user has a wallet
-    has_wallet = get_user_wallet(user_id, wallet_name, pin) is not None
+    has_wallet: bool = has_user_wallet(str(user_id), pin)
     
     # Use plain text without Markdown for safer rendering
-    help_text = (
+    help_text: str = (
         "🤖 BSC Wallet Bot Commands\n\n"
         
         "Wallet Management:\n"
@@ -31,7 +37,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/rename_wallet - Rename your currently active wallet\n"
         "/backup - Backup your active wallet's seed phrase\n"
         "/export_key - Export private key of your active wallet\n"
-        "/recover - Recover a wallet using a private key\n\n"
+        "/recover - Recover a wallet using a private key\n"
+        "/deletewalletsall - Delete all wallets and mnemonic keys (DANGER!)\n\n"
         
         "Security:\n"
         "/set_pin - Set or change your security PIN\n"
@@ -65,22 +72,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         help_text += "\n\n💡 You don't have a wallet yet. Use /wallet to create one."
     
     # Send without parse_mode to avoid Markdown parsing issues
-    await update.message.reply_text(help_text)
+    message = update.message
+    if message:
+        await message.reply_text(help_text)
 
 async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show help information, even in group chats."""
     # Use plain text without Markdown for safer rendering
-    help_text = (
+    help_text: str = (
         "🤖 BSC Wallet Bot Commands\n\n"
         
         "Wallet Management:\n"
         "/wallet - Show all wallets and active wallet info\n"
         "/wallets - List all wallets and switch between them\n"
+        "/switch - Switch to a different wallet\n"
         "/addwallet - Add a new wallet (create or import)\n"
         "/rename_wallet - Rename your currently active wallet\n"
         "/backup - Backup your active wallet's seed phrase\n"
         "/export_key - Export private key of your active wallet\n"
-        "/recover - Recover a wallet using a private key\n\n"
+        "/recover - Recover a wallet using a private key\n"
+        "/deletewalletsall - Delete all wallets and mnemonic keys (DANGER!)\n\n"
         
         "Security:\n"
         "/set_pin - Set or change your security PIN\n"
@@ -105,4 +116,6 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
     )
     
     # Send without parse_mode to avoid Markdown parsing issues
-    await update.message.reply_text(help_text) 
+    message = update.message
+    if message:
+        await message.reply_text(help_text) 

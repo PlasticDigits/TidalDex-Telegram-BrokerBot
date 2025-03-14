@@ -2,6 +2,7 @@
 Mnemonic wallet functionality for generating and using seed phrases.
 """
 import secrets
+from typing import Dict, List, Any, Optional, Union
 from eth_account import Account
 from mnemonic import Mnemonic
 import binascii
@@ -10,7 +11,7 @@ from utils.config import DEFAULT_DERIVATION_PATH, ACCOUNT_PATH_TEMPLATE
 # Import BIP functionality
 Account.enable_unaudited_hdwallet_features()
 
-def create_mnemonic(strength=128):
+def create_mnemonic(strength: int = 128) -> str:
     """
     Generate a new mnemonic phrase (seed phrase).
     
@@ -30,16 +31,16 @@ def create_mnemonic(strength=128):
     
     return mnemonic
 
-def create_mnemonic_wallet(mnemonic, account_path=None):
+def create_mnemonic_wallet(mnemonic: str, account_path: Optional[str] = None) -> Dict[str, str]:
     """
     Create a wallet from a mnemonic phrase.
     
     Args:
         mnemonic (str): Space-separated mnemonic phrase
-        account_path (str, optional): Derivation path (if None, uses DEFAULT_DERIVATION_PATH)
+        account_path (Optional[str]): Derivation path (if None, uses DEFAULT_DERIVATION_PATH)
     
     Returns:
-        dict: A dictionary containing the wallet address and private key
+        Dict[str, str]: A dictionary containing the wallet address and private key
             {
                 'address': '0x...',
                 'private_key': '0x...',
@@ -77,21 +78,25 @@ def create_mnemonic_wallet(mnemonic, account_path=None):
     except Exception as e:
         raise ValueError(f"Error creating wallet from mnemonic: {str(e)}")
 
-def derive_wallet_from_mnemonic(mnemonic, index=0, account_path_template=None):
+def derive_wallet_from_mnemonic(
+    mnemonic: str, 
+    index: int = 0, 
+    account_path_template: Optional[str] = None
+) -> Dict[str, str]:
     """
     Derive a wallet at a specific index from a mnemonic phrase.
     
     Args:
         mnemonic (str): Space-separated mnemonic phrase
         index (int): Index of the wallet to derive (default: 0)
-        account_path_template (str, optional): Template for derivation path with {} placeholder for index
+        account_path_template (Optional[str]): Template for derivation path with {} placeholder for index
     
     Returns:
-        dict: A dictionary containing the wallet address and private key
+        Dict[str, str]: A dictionary containing the wallet address and private key
             {
                 'address': '0x...',
                 'private_key': '0x...',
-                'index': 0,
+                'index': '0',
                 'path': 'm/44\'/60\'/0\'/0/0'
             }
     """
@@ -106,11 +111,16 @@ def derive_wallet_from_mnemonic(mnemonic, index=0, account_path_template=None):
     wallet_data = create_mnemonic_wallet(mnemonic, account_path)
     
     # Add index information
-    wallet_data['index'] = index
+    wallet_data['index'] = str(index)
     
     return wallet_data
 
-def derive_multiple_wallets(mnemonic, count=5, start_index=0, account_path_template=None):
+def derive_multiple_wallets(
+    mnemonic: str, 
+    count: int = 5, 
+    start_index: int = 0, 
+    account_path_template: Optional[str] = None
+) -> List[Dict[str, str]]:
     """
     Derive multiple wallets from a single mnemonic phrase.
     
@@ -118,10 +128,10 @@ def derive_multiple_wallets(mnemonic, count=5, start_index=0, account_path_templ
         mnemonic (str): Space-separated mnemonic phrase
         count (int): Number of wallets to derive
         start_index (int): Starting index for derivation
-        account_path_template (str, optional): Template for derivation path
+        account_path_template (Optional[str]): Template for derivation path
     
     Returns:
-        list: List of wallet dictionaries
+        List[Dict[str, str]]: List of wallet dictionaries
     """
     # Use default template if none provided
     if account_path_template is None:

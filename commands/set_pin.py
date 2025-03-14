@@ -3,11 +3,11 @@ Set PIN command for wallet security.
 
 This module handles setting and updating the user's PIN for wallet security.
 """
-from telegram import Update
+from telegram import Update, User, Message
 from telegram.ext import ContextTypes, ConversationHandler
 import logging
 import traceback
-import re
+from typing import Dict, Tuple, Optional, Any, Union
 from db.utils import hash_user_id
 from services.pin.PINManager import pin_manager
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 ENTERING_CURRENT_PIN, ENTERING_PIN, CONFIRMING_PIN = range(3)
 
 # Store temporary data during conversation
-user_temp_data = {}
+user_temp_data: Dict[int, Dict[str, Any]] = {}
 
 async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
@@ -26,8 +26,12 @@ async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     If the user already has a PIN, they will be asked to enter it first.
     Otherwise, they will be asked to set a new PIN.
     """
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
+    if not update.effective_user:
+        logger.error("No effective user found in update")
+        return ConversationHandler.END
+        
+    user_id: int = update.effective_user.id
+    user_id_str: str = hash_user_id(user_id)
     
     logger.info(f"Set PIN command initiated by user {user_id_str}")
     
@@ -36,9 +40,13 @@ async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         user_temp_data[user_id] = {}
     
     # Check if user already has a PIN
-    has_existing_pin = pin_manager.needs_pin(user_id)
+    has_existing_pin: bool = pin_manager.needs_pin(user_id)
     user_temp_data[user_id]['is_updating'] = has_existing_pin
     
+    if not update.message:
+        logger.error("No message found in update")
+        return ConversationHandler.END
+        
     if has_existing_pin:
         logger.info(f"User {user_id_str} already has a PIN, will update it")
         await update.message.reply_text(
@@ -51,7 +59,7 @@ async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(
             "🔐 Setting a PIN will encrypt your wallet's sensitive data.\n\n"
             "PIN requirements:\n"
-            "• Must be 6-48 characters long\n"
+            "• Must be 4-48 characters long\n"
             "• Can include letters, numbers, and special characters\n"
             "• You are responsible for picking a secure PIN\n"
             "Please enter your new PIN:"
@@ -62,9 +70,13 @@ async def process_current_pin(update: Update, context: ContextTypes.DEFAULT_TYPE
     """
     Verify the user's current PIN before allowing an update.
     """
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
-    current_pin = update.message.text.strip()
+    if not update.effective_user or not update.message or not update.message.text:
+        logger.error("Missing required update data")
+        return ConversationHandler.END
+        
+    user_id: int = update.effective_user.id
+    user_id_str: str = hash_user_id(user_id)
+    current_pin: str = update.message.text.strip()
     
     # Delete the message with PIN for security
     try:
@@ -88,8 +100,7 @@ async def process_current_pin(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(
         "✅ Current PIN verified. Please enter your new PIN:\n\n"
         "PIN requirements:\n"
-        "PIN requirements:\n"
-        "• Must be 6-48 characters long\n"
+        "• Must be 4-48 characters long\n"
         "• Can include letters, numbers, and special characters\n"
         "• You are responsible for picking a secure PIN\n"
         "Please enter your new PIN:"
@@ -100,9 +111,13 @@ async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     """
     Process the new PIN entry and check if it meets requirements.
     """
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
-    new_pin = update.message.text.strip()
+    if not update.effective_user or not update.message or not update.message.text:
+        logger.error("Missing required update data")
+        return ConversationHandler.END
+        
+    user_id: int = update.effective_user.id
+    user_id_str: str = hash_user_id(user_id)
+    new_pin: str = update.message.text.strip()
     
     # Delete the message with PIN for security
     try:
@@ -111,13 +126,17 @@ async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         logger.warning(f"Could not delete message with new PIN: {e}")
     
     # Validate PIN complexity
-    is_valid, error_message = validate_pin_complexity(new_pin)
+    validation_result: Tuple[bool, Optional[str]] = validate_pin_complexity(new_pin)
+    is_valid: bool = validation_result[0]
+    error_message: Optional[str] = validation_result[1]
     
     if not is_valid:
         await update.message.reply_text(
             f"❌ {error_message}\n\n"
             "PIN requirements:\n"
-            "• Must be 6-48 characters long\n"
+            "• Must be 4-48 characters long\n"
+            "• Can include letters, numbers, and special characters\n"
+            "• At least 8 characters recommended\n"
             "• You are responsible for picking a secure PIN\n"
             "Please try again or use /cancel to abort."
         )
@@ -142,9 +161,13 @@ async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Confirm the PIN and save it if it matches."""
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
-    confirmation_pin = update.message.text.strip()
+    if not update.effective_user or not update.message or not update.message.text:
+        logger.error("Missing required update data")
+        return ConversationHandler.END
+        
+    user_id: int = update.effective_user.id
+    user_id_str: str = hash_user_id(user_id)
+    confirmation_pin: str = update.message.text.strip()
     
     # Delete the message with PIN for security
     try:
@@ -161,8 +184,15 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
     
     # Get the PIN from temporary data
-    new_pin = user_temp_data[user_id].get('pin')
-    is_updating = user_temp_data[user_id].get('is_updating', False)
+    new_pin: Optional[str] = user_temp_data[user_id].get('pin')
+    is_updating: bool = user_temp_data[user_id].get('is_updating', False)
+    
+    if not new_pin:
+        logger.error(f"No PIN found in temp data for user {user_id_str}")
+        await update.message.reply_text(
+            "❌ An error occurred. Please start over with /set_pin."
+        )
+        return ConversationHandler.END
     
     # Check if PINs match
     if new_pin != confirmation_pin:
@@ -177,10 +207,11 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     # PINs match, save to database
     try:
         if is_updating:
-                # Update the PIN in the PIN manager as well
+            # Update the PIN in the PIN manager as well
             logger.info(f"Updating PIN for user {user_id_str} with data re-encryption")
-            success = pin_manager.set_pin(user_id, new_pin)
-            if success:
+            update_result: Tuple[bool, Optional[str]] = pin_manager.set_pin(user_id, new_pin)
+            update_success: bool = update_result[0]
+            if update_success:
                 logger.info(f"Successfully updated PIN for user {user_id_str}")
                 await update.message.reply_text(
                     "✅ Your PIN has been updated successfully!\n\n"
@@ -190,13 +221,14 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             else:
                 logger.error(f"Failed to update PIN for user {user_id_str}")
                 await update.message.reply_text(
-                    f"❌ Failed to update PIN. Please try again later."
+                    "❌ Failed to update PIN. Please try again later."
                 )
         else:
             # Set initial PIN in database and encrypt wallet data
             logger.info(f"Setting initial PIN for user {user_id_str} with data re-encryption")
-            success = pin_manager.set_pin(user_id, new_pin)
-            if success:
+            set_result: Tuple[bool, Optional[str]] = pin_manager.set_pin(user_id, new_pin)
+            set_success: bool = set_result[0]
+            if set_success:
                 logger.info(f"Successfully set initial PIN for user {user_id_str}")
                 await update.message.reply_text(
                     "✅ Your PIN has been set successfully!\n\n"
@@ -206,7 +238,7 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             else:
                 logger.error(f"Failed to set PIN for user {user_id_str}")
                 await update.message.reply_text(
-                    f"❌ Failed to set PIN. Please try again later."
+                    "❌ Failed to set PIN. Please try again later."
                 )
     except Exception as e:
         logger.error(f"Error in PIN operation for user {user_id_str}: {e}")
@@ -223,8 +255,12 @@ async def confirm_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the PIN setting process."""
-    user_id = update.effective_user.id
-    user_id_str = hash_user_id(user_id)
+    if not update.effective_user or not update.message:
+        logger.error("Missing required update data")
+        return ConversationHandler.END
+        
+    user_id: int = update.effective_user.id
+    user_id_str: str = hash_user_id(user_id)
     
     # Clean up any temporary data
     if user_id in user_temp_data:
@@ -236,7 +272,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return ConversationHandler.END
 
-def validate_pin_complexity(pin):
+def validate_pin_complexity(pin: str) -> Tuple[bool, Optional[str]]:
     """
     Validate that the PIN meets complexity requirements.
     
@@ -246,8 +282,13 @@ def validate_pin_complexity(pin):
     Returns:
         tuple: (is_valid, error_message)
     """
-    # Check length (6-48 characters)
-    if len(pin) < 6 or len(pin) > 48:
-        return False, "PIN must be between 6 and 48 characters long."
-    
-    return True, "" 
+    if not pin:
+        return False, "PIN cannot be empty"
+        
+    if len(pin) < 4:
+        return False, "PIN must be at least 4 characters long"
+        
+    if len(pin) > 48:
+        return False, "PIN cannot be longer than 48 characters"
+        
+    return True, None 

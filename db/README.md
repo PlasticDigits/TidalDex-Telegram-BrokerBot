@@ -70,24 +70,3 @@ For enhanced security, all user IDs are irreversibly hashed using SHA-256 before
 3. Data lookup is performed using the same hashing algorithm, ensuring consistent access
 
 This approach provides an additional layer of security and privacy for users.
-
-## Usage
-
-```python
-import db
-
-# Initialize the database
-db.init_db()
-
-# Get a user's wallet
-wallet = db.get_user_wallet(user_id)
-
-# Save a wallet
-db.save_user_wallet(user_id, wallet_data, wallet_name="Default", pin=None)
-
-# Save a mnemonic
-db.save_user_mnemonic(user_id, mnemonic, pin=None)
-
-# Close connection when done
-db.close_connection()
-```

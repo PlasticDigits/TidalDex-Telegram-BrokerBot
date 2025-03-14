@@ -1,6 +1,6 @@
 # TidalDex Telegram Broker Bot
 
-A Telegram bot for managing crypto wallets and trading on decentralized exchanges (DEX).
+A Python Telegram bot for managing crypto wallets and trading on decentralized exchanges (DEX).
 
 ## Features
 
@@ -31,6 +31,61 @@ Start a conversation with the bot on Telegram and use the following commands:
 - `/receive` - Get your wallet address for receiving funds
 - `/backup` - Create a backup of your wallet
 - `/lock` - Lock your wallet by clearing the stored PIN
+
+## Type checking
+
+Use `mypy main.py --strict` for type checking.
+
+## Database
+
+The TidalDex Telegram Broker Bot supports two database backends:
+
+### Database Options
+
+1. **SQLite** (Default)
+
+   - Lightweight, file-based database
+   - Perfect for personal use or small deployments
+   - No additional setup required
+   - Data stored in `data/tidaldex.db` by default
+
+2. **PostgreSQL**
+   - Robust, scalable database for production environments
+   - Better performance with many concurrent users
+   - Supports advanced features like replication and backups
+   - Requires a PostgreSQL server
+
+### Configuration
+
+Database settings are configured in the `.env` file:
+
+```
+# Database configuration
+DB_TYPE=sqlite3        # Options: sqlite3, postgresql
+DB_NAME=tidaldex.db    # Database name or path for SQLite
+
+# PostgreSQL specific configurations (only needed if DB_TYPE=postgresql)
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+### Database Schema
+
+The database includes tables for:
+
+- Users: Stores user information and settings
+- Mnemonics: Securely stores encrypted seed phrases
+- Wallets: Manages wallet addresses, encrypted private keys, and metadata
+- PIN attempts: Tracks PIN verification attempts for security
+
+### Security Features
+
+- All sensitive data (private keys and mnemonics) are encrypted using Fernet symmetric encryption
+- User IDs are hashed using SHA-256 before storage for enhanced privacy
+- PIN protection with configurable expiration time
+- Automatic retry mechanism for handling database locks
 
 ## License
 

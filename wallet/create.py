@@ -1,15 +1,16 @@
 """
 Wallet creation module.
 """
+from typing import Dict
 import secrets
 from eth_account import Account
 
-def create_wallet():
+def create_wallet() -> Dict[str, str]:
     """
     Generate a new wallet with private key and address.
     
     Returns:
-        dict: A dictionary containing the wallet address and private key
+        Dict[str, str]: A dictionary containing the wallet address and private key
             {
                 'address': '0x...',
                 'private_key': '0x...'

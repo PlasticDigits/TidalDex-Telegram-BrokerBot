@@ -20,8 +20,6 @@ from utils.self_destruction_message import (
 from services.pin import handle_pin_input
 # Import restructured database module
 import db
-# Import balance tracking utilities
-from utils.balance_tracker import setup_periodic_balance_updates
 
 # Import command handlers from commands package
 from commands.start import start
@@ -39,9 +37,9 @@ from commands.send import (
 from commands.lock import lock_command
 from commands.cancel import cancel
 from commands.recover import (
-    recovery_choice_callback, process_private_key, 
+    recovery_choice_callback, 
     process_mnemonic, process_wallet_name as recovery_process_wallet_name,
-    pin_protected_recover, CHOOSING_RECOVERY_TYPE, WAITING_FOR_PRIVATE_KEY,
+    pin_protected_recover, CHOOSING_RECOVERY_TYPE,
     WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME as RECOVERY_ENTERING_WALLET_NAME
 )
 from commands.backup import pin_protected_backup
@@ -62,6 +60,8 @@ from commands.set_pin import (
 from commands.track import track_conv_handler
 from commands.track_stop import track_stop_conv_handler
 from commands.track_view import track_view_conv_handler
+# Import delete all wallets command
+from commands.deletewalletsall import deletewalletsall_conv_handler
 
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -149,7 +149,7 @@ def main() -> None:
 
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("wallets", wallets_wrapper)],
+        entry_points=[CommandHandler("wallets", wallets_wrapper),CommandHandler("switch", wallets_wrapper)],
         states={
             #regex should match select_wallet:wallet_name and cancel_wallet_selection
             SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^(wallets_.*)$')],
@@ -194,7 +194,6 @@ def main() -> None:
         entry_points=[CommandHandler("recover", recover_wrapper)],
         states={
             CHOOSING_RECOVERY_TYPE: [CallbackQueryHandler(recovery_choice_callback, pattern=r'^(recover_.*)$')],
-            WAITING_FOR_PRIVATE_KEY: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_private_key)],
             WAITING_FOR_MNEMONIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_mnemonic)],
             RECOVERY_ENTERING_WALLET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recovery_process_wallet_name)],
         },
@@ -233,6 +232,9 @@ def main() -> None:
     application.add_handler(track_stop_conv_handler)
     application.add_handler(track_view_conv_handler)
     
+    # Add delete all wallets handler
+    application.add_handler(deletewalletsall_conv_handler)
+    
     # Add handlers for sensitive message buttons (self-destructing messages)
     logger.info(f"Registering sensitive message button handlers with patterns: '{SHOW_SENSITIVE_INFO}' and '{DELETE_NOW}'")
     application.add_handler(CallbackQueryHandler(
@@ -250,9 +252,6 @@ def main() -> None:
         handle_pin_input
     ))
     
-    # Setup periodic balance updates for tracked tokens
-    setup_periodic_balance_updates(application)
-    
     # Add error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log the error and send a telegram message to notify the developer."""
@@ -267,26 +266,14 @@ def main() -> None:
 
     #DEBUGGING
     # Add this near the end of your main() function, before application.run_polling()
-    async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Debug callback to see if button clicks are being captured."""
         query = update.callback_query
-        logger.info(f"DEBUG: Received callback with data: {query.data}")
+        if query:
+            logger.info(f"DEBUG: Received callback with data: {query.data}")
+        else:
+            logger.warning("DEBUG: Received callback but update.callback_query is None")
         
-        # Check if this is one of our wallet buttons
-        if query.data in ['create_wallet', 'import_wallet']:
-            logger.info("This is a wallet creation button!")
-        
-        await query.answer(text=f"Button click detected: {query.data}")
-        
-        # For testing, try to manually trigger the action_choice_callback
-        if query.data in ['create_wallet', 'import_wallet']:
-            from commands.addwallet import action_choice_callback
-            try:
-                logger.info("Manually calling action_choice_callback")
-                await action_choice_callback(update, context)
-            except Exception as e:
-                logger.error(f"Error calling action_choice_callback: {e}")
-                logger.error(traceback.format_exc())
     # Add this handler AFTER all your conversation handlers
     application.add_handler(CallbackQueryHandler(debug_callback))
     
