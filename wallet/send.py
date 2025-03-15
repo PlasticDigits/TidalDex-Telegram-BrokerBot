@@ -51,10 +51,10 @@ async def send_bnb(
     
     # Check BNB balance
     balance_wei: int = int(w3.eth.get_balance(checksum_from_address))
-    balance_bnb: Decimal = w3.from_wei(balance_wei, 'ether')
+    balance_bnb: Decimal = Decimal(w3.from_wei(balance_wei, 'ether'))
 
     # get amount in bnb
-    amount_bnb: Decimal = w3.from_wei(amount_wei, 'ether')
+    amount_bnb: Decimal = Decimal(w3.from_wei(amount_wei, 'ether'))
     
     if status_callback:
         await status_callback(f"Your balance: {balance_bnb} BNB")
@@ -77,7 +77,7 @@ async def send_bnb(
     total_needed = amount_wei + gas_info['gas_wei']
     if total_needed > balance_wei:
         available_for_transfer = balance_wei - gas_info['gas_wei']
-        max_bnb = w3.from_wei(available_for_transfer, 'ether')
+        max_bnb = Decimal(w3.from_wei(int(available_for_transfer), 'ether'))
         error_msg = f"Insufficient funds for gas + amount. Maximum amount you can send is {max_bnb} BNB after gas."
         if status_callback:
             await status_callback(f"Error: {error_msg}")
@@ -94,8 +94,8 @@ async def send_bnb(
         'nonce': nonce,
         'to': checksum_to_address,
         'value': amount_wei,
-        'gas': gas_info['gas_estimate'],
-        'gasPrice': gas_info['gas_price'],
+        'gas': int(gas_info['gas_estimate']),
+        'gasPrice': Wei(int(gas_info['gas_price'])),
         'chainId': w3.eth.chain_id,
     }
     
@@ -248,7 +248,7 @@ async def send_token(
         
         # Check BNB balance for gas
         bnb_balance_wei = w3.eth.get_balance(checksum_from_address)
-        bnb_balance = w3.from_wei(bnb_balance_wei, 'ether')
+        bnb_balance = Decimal(w3.from_wei(bnb_balance_wei, 'ether'))
         
         if gas_estimate['gas_wei'] > bnb_balance_wei:
             error_msg = f"Insufficient BNB for gas. You need {gas_estimate['gas_bnb']} BNB but have {bnb_balance} BNB."
@@ -375,7 +375,7 @@ async def send_contract_call(
         await status_callback("Checking BNB balance for gas...")
     
     balance_wei = w3.eth.get_balance(checksum_from_address)
-    balance_bnb = w3.from_wei(balance_wei, 'ether')
+    balance_bnb = Decimal(w3.from_wei(balance_wei, 'ether'))
     
     if gas_info['gas_wei'] > balance_wei:
         error_msg = f"Insufficient BNB for gas. Need {gas_info['gas_bnb']} BNB but have {balance_bnb} BNB"
@@ -393,8 +393,8 @@ async def send_contract_call(
     tx = contract_function.build_transaction({
         'from': checksum_from_address,
         'nonce': nonce,
-        'gas': gas_info['gas_estimate'],
-        'gasPrice': gas_info['gas_price'],
+        'gas': int(gas_info['gas_estimate']),
+        'gasPrice': Wei(int(gas_info['gas_price'])),
         'chainId': w3.eth.chain_id,
     })
     
