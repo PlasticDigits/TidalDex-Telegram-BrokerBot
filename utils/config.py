@@ -29,7 +29,7 @@ BSC_RPC_URL: str = get_env_var('BSC_RPC_URL')
 TELEGRAM_BOT_TOKEN: str = get_env_var('TELEGRAM_BOT_TOKEN')
 ENCRYPTION_KEY: str = get_env_var('ENCRYPTION_KEY')
 DEFAULT_TOKEN_LIST: str = get_env_var('DEFAULT_TOKEN_LIST', 'https://raw.githubusercontent.com/chinese-zodiac/tidaldex-fe/refs/heads/main/src/config/constants/tokenLists/tidaldex-default.tokenlist.json')
-
+BSC_SCANNER_URL: str = get_env_var('BSC_SCANNER_URL', 'https://bscscan.com')
 # PIN security settings
 PIN_EXPIRATION_TIME: int = int(get_env_var('PIN_EXPIRATION_TIME', 1800))  # Default: 30 minutes (in seconds)
 

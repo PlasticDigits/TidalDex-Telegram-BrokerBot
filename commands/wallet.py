@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from services.wallet import get_active_wallet_name, get_user_wallets, create_wallet, has_user_wallet, set_active_wallet, has_user_mnemonic, create_mnemonic
 from services.pin import pin_manager
 from db.wallet import WalletData
+from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,12 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Check if the user has any wallets
     pin: Optional[str] = pin_manager.get_pin(update.effective_user.id)
     user_has_wallet: bool = has_user_wallet(user_id_str, pin)
-    logger.info(f"User {user_id_str} has wallet: {user_has_wallet}")
+    logger.info(f"User {hash_user_id(user_id_str)} has wallet: {user_has_wallet}")
     
     if user_has_wallet:
         # Get context data
         wallet_name: Optional[str] = get_active_wallet_name(user_id_str)
-        logger.info(f"User {user_id_str} has active wallet: {wallet_name}")
+        logger.info(f"User {hash_user_id(user_id_str)} has active wallet: {wallet_name}")
         
         # Get all wallets (returns a dictionary with wallet names as keys)
         all_wallets: Dict[str, WalletData] = get_user_wallets(user_id_str, False, pin)
@@ -43,27 +44,33 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             success: bool = set_active_wallet(user_id_str, first_wallet_name)
             if success:
                 wallet_name = first_wallet_name
-                logger.info(f"Set first wallet '{first_wallet_name}' as active for user {user_id_str}")
-        
-        # Mark active wallet
-        wallet_list: List[str] = []
+                logger.info(f"Set first wallet '{first_wallet_name}' as active for user {hash_user_id(user_id_str)}")
+
+        # Seperate private key wallets and mnemonic wallets
+        private_key_wallets: List[str] = []
+        mnemonic_wallets: List[str] = []
         for name, wallet_data in all_wallets.items():
-            if wallet_data:  # Make sure wallet_data is not None
-                active_marker: str = "✅ " if name == wallet_name else ""
-                wallet_address: str = wallet_data.get('address', '')
-                # Format with monospace font
-                wallet_list.append(f"{active_marker}{name}: `{wallet_address}`")
-        
-        wallets_info: str = "\n".join(wallet_list)
-        logger.info(f"Wallet info: {wallets_info}")
+            line: str = f"{name}: `{wallet_data.get('address', '')}`"
+            if name == wallet_name:
+                line = f"✅ **{line}**"
+            if wallet_data.get('derivation_path'):
+                mnemonic_wallets.append(line)
+            else:
+                private_key_wallets.append(line)
+
+        mnemonic_wallets_info: str = len(mnemonic_wallets) > 0 and "Mnemonic wallets:\n" + "\n".join(mnemonic_wallets) + "\n\n" or ""
+        private_key_wallets_info: str = len(private_key_wallets) > 0 and "Private key wallets:\n" + "\n".join(private_key_wallets) + "\n\n" or ""
         
         # Ensure message is not None before calling reply_text
         if update.message is not None:
             # use MarkdownV2 without html or error handling
             await update.message.reply_text(
-                f"🔑 Your wallets \({len(all_wallets)}\):\n\n{wallets_info}\n\n"
+                f"🔑 Your wallets \({len(all_wallets)}\):\n\n"
+                f"{mnemonic_wallets_info}"
+                f"{private_key_wallets_info}"
                 "Use /addwallet to add more wallets or /rename\_wallet to rename the active wallet\.\n"
                 "Use /send to send funds\.\n"
+                "Use /receive to receive funds\.\n"
                 "Use /switch to switch to a different wallet\.",
                 parse_mode='MarkdownV2'
             )
@@ -85,6 +92,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     f"✅ Created a new wallet named '{new_wallet_name}'\n\n"
                     f"Address: `{new_wallet_address}`\n\n"
                     "You can now use /send to send funds and /receive to view your address\.\n"
+                    "Use /addwallet to create additional wallets.\n\n"
                     "Important: Use /backup to save your recovery phrase\!",
                     parse_mode='MarkdownV2'
                 )

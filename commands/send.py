@@ -11,6 +11,7 @@ import logging
 from db.wallet import WalletData
 from web3 import Web3 as w3
 from decimal import Decimal
+from utils.config import BSC_SCANNER_URL
 from wallet.send import send_token, send_bnb
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -278,29 +279,25 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Validate recipient address
         try:
             valid_recipient = validate_address(recipient_address)
-            status_result = status_callback("✓ Recipient address validated")
-            if status_result is not None:
-                await status_result
+            await status_callback("✓ Recipient address validated")
         except ValueError as e:
             logger.error(f"Invalid recipient address: {e}")
-            await response.edit_text(f"❌ Transaction failed: Invalid recipient address.\n{str(e)}")
+            await response.edit_text(f"❌ Invalid recipient address: {str(e)}")
             return ConversationHandler.END
         
-        # Get user address in checksum format
-        user_address = user_wallet['address']
+        # Get wallet information
+        user_address = user_wallet.get('address', '')
+        private_key = user_wallet.get('private_key', '')
         
-        # Check user's BNB balance
-        status_result = status_callback("Checking your BNB balance...")
-        if status_result is not None:
-            await status_result
-        bnb_balance_wei = await wallet_manager.get_bnb_balance(user_address)
-        bnb_balance_value = int(bnb_balance_wei.get('raw_balance', 0)) if isinstance(bnb_balance_wei, dict) else 0
-        bnb_balance: Decimal = Decimal(w3.from_wei(bnb_balance_value, 'ether'))
+        # Check BNB balance
+        await status_callback("Checking your BNB balance...")
+        bnb_balance_response = await wallet_manager.get_bnb_balance(user_address)
+        bnb_balance = float(bnb_balance_response.get('balance', 0))
         
         if send_all:
             # If sending all, use utility function to calculate max amount
             try:
-                max_amount_info = estimate_max_bnb_transfer(
+                max_amount_info = await estimate_max_bnb_transfer(
                     user_address,
                     valid_recipient,
                     bnb_balance,
@@ -310,13 +307,9 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 amount_max = Decimal(max_amount_info['max_amount'] if isinstance(max_amount_info, dict) else max_amount_info)
                 # Fix: Convert Decimal to string before passing to status_callback
                 amount_str = str(amount_max)
-                status_result = status_callback(f"Sending {amount_str} BNB (entire balance minus gas)")
-                if status_result is not None:
-                    await status_result
+                await status_callback(f"Sending {amount_str} BNB (entire balance minus gas)")
             except ValueError as e:
-                status_result = status_callback(f"❌ Insufficient balance for gas fees.")
-                if status_result is not None:
-                    await status_result
+                await status_callback(f"❌ Insufficient balance for gas fees.")
                 await response.edit_text(
                     f"❌ Transaction failed: {str(e)}\n\n"
                     f"Your balance is too low to send BNB after accounting for gas fees."
@@ -328,46 +321,56 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if send_amount is None:
                 await response.edit_text("❌ Transaction failed: Amount not specified.")
                 return ConversationHandler.END
-                
-            # Convert to Decimal for consistent arithmetic
-            amount = Decimal(str(send_amount))
             
             try:
-                # Use utility function to estimate gas
-                gas_info = estimate_bnb_transfer_gas(
-                    user_address, 
-                    valid_recipient, 
-                    amount, 
-                    status_callback
-                )
+                # Convert to Decimal for precision
+                amount = Decimal(str(send_amount))
                 
-                gas_cost_bnb = gas_info['gas_bnb']
+                # Get gas cost estimate for basic transfer
+                try:
+                    # Create async callback for gas estimation
+                    async def async_callback(message: str) -> None:
+                        await status_callback(message)
+                    
+                    # Use the actual amount for gas calculation
+                    gas_info = await estimate_bnb_transfer_gas(
+                        user_address, 
+                        valid_recipient, 
+                        amount,  # Actual amount
+                        async_callback
+                    )
+                    
+                    gas_cost_bnb = gas_info.get('gas_bnb', 0)
+                except Exception as e:
+                    logger.error(f"Error estimating gas: {e}")
+                    await response.edit_text(
+                        f"❌ Transaction failed: Error estimating gas.\n"
+                        f"Your balance: {bnb_balance} BNB\n"
+                        f"Amount: {amount} BNB\n"
+                        f"Gas cost: {gas_cost_bnb} BNB\n"
+                        f"Required: {required_amount} BNB (amount + gas)\n\n"
+                        f"{str(e)}"
+                        
+                    )
+                    return ConversationHandler.END
+                
                 required_amount = amount + Decimal(str(gas_cost_bnb))
                 
+                # Check if user has sufficient balance
                 if bnb_balance < required_amount:
-                    status_result = status_callback(f"❌ Insufficient balance. You have {bnb_balance} BNB but need {required_amount} BNB (including gas).")
-                    if status_result is not None:
-                        await status_result
+                    await status_callback(f"❌ Insufficient balance. You have {bnb_balance} BNB but need {required_amount} BNB (including gas).")
                     await response.edit_text(
                         f"❌ Transaction failed: Insufficient balance.\n\n"
                         f"Your balance: {bnb_balance} BNB\n"
-                        f"Transaction amount: {amount} BNB\n"
-                        f"Estimated gas cost: {gas_cost_bnb} BNB\n"
-                        f"Total required: {required_amount} BNB\n\n"
+                        f"Required: {required_amount} BNB (amount + gas)\n\n"
                         f"Please add funds to your wallet and try again."
                     )
                     return ConversationHandler.END
                 
-                status_result = status_callback(f"✓ Balance sufficient: {bnb_balance} BNB")
-                if status_result is not None:
-                    await status_result
+                await status_callback(f"✓ Balance sufficient: {bnb_balance} BNB")
             except Exception as e:
-                logger.error(f"Error estimating gas: {e}")
-                await response.edit_text(
-                    f"❌ Transaction failed: Error estimating gas.\n\n"
-                    f"Error: {str(e)}\n\n"
-                    f"Please try again later."
-                )
+                logger.error(f"Error checking balance: {e}")
+                await response.edit_text(f"❌ Transaction failed: Error checking balance.\n{str(e)}")
                 return ConversationHandler.END
         
         # Ensure we have a private key
@@ -385,18 +388,17 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             amount_to_convert = amount if amount is not None else Decimal('0')
             amount_wei = int(w3.to_wei(amount_to_convert, 'ether'))
         
-        # Create a synchronous callback wrapper
-        def sync_callback(message: str) -> None:
-            """Convert potentially async callback to sync callback"""
-            result = status_callback(message)
-            # We don't await the result here, as this is a synchronous function
+        # Create a asynchronous callback wrapper
+        async def async_callback(message: str) -> None:
+            """Async callback function"""
+            await status_callback(message)
         
         # Send BNB with status updates
-        tx_result = send_bnb(
+        tx_result = await send_bnb(
             private_key, 
             valid_recipient, 
             amount_wei,  
-            status_callback=sync_callback  # Use the synchronous wrapper
+            status_callback=async_callback
         )
         
         # Final success message
@@ -405,6 +407,7 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"Amount: {amount} BNB{' (entire balance minus gas)' if send_all else ''}\n"
             f"Recipient: {valid_recipient}\n"
             f"TX Hash: `{tx_result['tx_hash']}`\n"
+            f"[View on Scanner]({BSC_SCANNER_URL}/tx/0x{tx_result['tx_hash']})\n"
             f"Block: {tx_result['block_number']}",
             parse_mode='Markdown'
         )
@@ -617,9 +620,7 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             valid_recipient: str = validate_address(recipient_address)
             valid_token_address: str = validate_address(token_info['address'])
-            status_result = status_callback("✓ Addresses validated")
-            if status_result is not None:
-                await status_result
+            await status_callback("✓ Addresses validated")
         except ValueError as e:
             logger.error(f"Invalid address: {e}")
             await response.edit_text(f"❌ Transaction failed: Invalid address.\n{str(e)}")
@@ -629,9 +630,7 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_address: str = user_wallet['address']
         
         # Get token contract and balance
-        status_result = status_callback(f"Checking your {token_info['symbol']} balance...")
-        if status_result is not None:
-            await status_result
+        await status_callback(f"Checking your {token_info['symbol']} balance...")
         
         token_balance_info: Dict[str, Any] = await wallet_manager.get_token_balance(valid_token_address, user_address)
         token_balance: float = token_balance_info['balance']
@@ -640,25 +639,19 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Determine amount to send
         if send_all:
             amount = token_balance
-            status_result = status_callback(f"Sending entire balance: {amount} {token_info['symbol']}")
-            if status_result is not None:
-                await status_result
+            await status_callback(f"Sending entire balance: {amount} {token_info['symbol']}")
         else:
             amount = context.user_data.get('send_token_amount')
             
             # Check if user has enough tokens
             if amount is None:
                 # Handle the case where amount is None
-                status_result = status_callback(f"❌ Error: Invalid amount specified.")
-                if status_result is not None:
-                    await status_result
+                await status_callback(f"❌ Error: Invalid amount specified.")
                 await response.edit_text("❌ Transaction failed: Invalid amount specified.")
                 return ConversationHandler.END
                 
             if token_balance < amount:
-                status_result = status_callback(f"❌ Insufficient {token_info['symbol']} balance. You have {token_balance} but need {amount}.")
-                if status_result is not None:
-                    await status_result
+                await status_callback(f"❌ Insufficient {token_info['symbol']} balance. You have {token_balance} but need {amount}.")
                 await response.edit_text(
                     f"❌ Transaction failed: Insufficient token balance.\n\n"
                     f"Your balance: {token_balance} {token_info['symbol']}\n"
@@ -667,54 +660,50 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 return ConversationHandler.END
         
-        status_result = status_callback(f"✓ Token balance sufficient: {token_balance} {token_info['symbol']}")
-        if status_result is not None:
-            await status_result
+        await status_callback(f"✓ Token balance sufficient: {token_balance} {token_info['symbol']}")
         
         # Use utility function to estimate gas
         try:
-            gas_info: Dict[str, float] = estimate_token_transfer_gas(
+            # Create async callback for gas estimation
+            async def async_status_callback(message: str) -> None:
+                await status_callback(message)
+            
+            gas_info: Dict[str, float] = await estimate_token_transfer_gas(
                 user_address,
                 valid_recipient,
                 valid_token_address,
                 float(amount) if amount is not None else 0.0,  # Convert to float with None check
                 decimals,
-                status_callback
+                async_status_callback
             )
             
             gas_required: float = gas_info['gas_bnb']
         except Exception as e:
             logger.warning(f"Gas estimation failed: {e}. Using default estimate.")
-            status_result = status_callback("Gas estimation failed. Using conservative default value.")
-            if status_result is not None:
-                await status_result
+            await status_callback("Gas estimation failed. Using conservative default value.")
             gas_required_default: float = 0.002  # Default gas cost for BSC token transfers
             gas_required = gas_required_default  # Use the default value
         
         # Check BNB balance for gas
-        status_result = status_callback("Checking your BNB balance for gas fees...")
-        if status_result is not None:
-            await status_result
+        await status_callback("Checking your BNB balance for gas fees...")
         bnb_balance_response = await wallet_manager.get_bnb_balance(user_address)
         bnb_balance_raw = int(bnb_balance_response.get('raw_balance', 0))
         bnb_balance: float = float(w3.from_wei(bnb_balance_raw, 'ether'))
         
+        # Ensure we have enough BNB for gas
         if bnb_balance < gas_required:
-            status_result = status_callback(f"❌ Insufficient BNB for gas fees. You have {bnb_balance} BNB but need {gas_required} BNB for gas.")
-            if status_result is not None:
-                await status_result
+            await status_callback(f"❌ Insufficient BNB for gas fees. You have {bnb_balance} BNB but need {gas_required} BNB for gas.")
             await response.edit_text(
                 f"❌ Transaction failed: Insufficient BNB for gas fees.\n\n"
                 f"Your BNB balance: {bnb_balance} BNB\n"
-                f"Estimated gas cost: {gas_required} BNB\n\n"
-                f"Please add some BNB to your wallet to cover gas fees and try again."
+                f"Required for gas: {gas_required} BNB\n\n"
+                f"Please add BNB to your wallet for gas and try again."
             )
             return ConversationHandler.END
         
-        bnb_balance_str = str(bnb_balance)
-        status_result = status_callback(f"✓ BNB balance sufficient for gas: {bnb_balance_str} BNB")
-        if status_result is not None:
-            await status_result
+        # Format balance with a reasonable number of decimals for display
+        bnb_balance_str = '{:.6f}'.format(bnb_balance)
+        await status_callback(f"✓ BNB balance sufficient for gas: {bnb_balance_str} BNB")
         
         # Ensure private_key is not None
         private_key = user_wallet.get('private_key', '')
@@ -722,37 +711,39 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await response.edit_text("❌ Transaction failed: Unable to access wallet private key.")
             return ConversationHandler.END
             
-        # Convert amount to string as required by send_token
-        amount_str = str(amount) if amount is not None else "0"
+        # Create an async callback wrapper for the token sending function
+        async def async_token_callback(message: str) -> None:
+            """Async callback function for token sending"""
+            await status_callback(message)
         
-        # Create a synchronous wrapper for the status_callback
-        # We need to convert our async callback to a synchronous one for send_token
-        async def sync_token_callback(message: str) -> None:
-            """Convert potentially async callback to sync callback"""
-            cb = status_callback(message)
-            if cb is None:
-                logger.error("Status callback returned None")
-                return
-            await cb
-        
-        # Send token with status updates
-        tx_result: Dict[str, Any] = await send_token(
-            private_key,
-            valid_token_address, 
-            valid_recipient, 
-            amount_str,
-            status_callback=sync_token_callback  # Use the synchronous wrapper
-        )
-        
-        # Final success message
-        await response.edit_text(
-            f"✅ Transaction successful!\n\n"
-            f"Amount: {amount} {token_info['symbol']}{' (entire balance)' if send_all else ''}\n"
-            f"Recipient: {valid_recipient}\n"
-            f"TX Hash: `{tx_result['tx_hash']}`\n"
-            f"Block: {tx_result['block_number']}",
-            parse_mode='Markdown'
-        )
+        # Send the token
+        try:
+            tx_result = await send_token(
+                private_key,
+                valid_token_address,
+                valid_recipient,
+                str(amount),
+                status_callback=async_token_callback
+            )
+            
+            # Format success message
+            success_message = (
+                f"✅ Transaction successful!\n\n"
+                f"Token: {token_info['symbol']}\n"
+                f"Amount: {amount}\n"
+                f"Recipient: {valid_recipient[:10]}...{valid_recipient[-8:]}\n"
+                f"TX Hash: `{tx_result['tx_hash']}`\n"
+                f"Block: {tx_result['block_number']}"
+            )
+            
+            await response.edit_text(success_message, parse_mode='Markdown')
+            
+        except Exception as e:
+            logger.error(f"Error sending token: {e}")
+            error_message = f"❌ Transaction failed: {str(e)}\n\nPlease check your balance and try again."
+            await response.edit_text(error_message)
+            
+        return ConversationHandler.END
     except Exception as e:
         logger.error(f"Error sending token: {e}")
         await response.edit_text(

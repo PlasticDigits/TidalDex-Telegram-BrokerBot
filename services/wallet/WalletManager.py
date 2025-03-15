@@ -32,7 +32,7 @@ from db.wallet import (
     get_user_wallets_with_keys as db_get_user_wallets_with_keys,
     has_user_wallet as db_has_user_wallet,
 )
-from db.mnemonic import get_user_mnemonic, save_user_mnemonic
+from db.mnemonic import get_user_mnemonic, save_user_mnemonic, get_user_mnemonic_index, increment_user_mnemonic_index
 from wallet.mnemonic import derive_wallet_from_mnemonic
 from wallet.send import send_bnb, send_token
 from wallet.balance import get_bnb_balance, get_token_balance
@@ -65,7 +65,7 @@ class WalletManager:
         self.w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
         logger.info("WalletManager initialized")
 
-    def send_bnb(self, user_id: str, recipient: str, amount: int, pin: Optional[str] = None, status_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:
+    async def send_bnb(self, user_id: str, recipient: str, amount_wei: int, pin: Optional[str] = None, status_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:
         """
         Send BNB from a user's wallet to a recipient.
         """
@@ -79,11 +79,11 @@ class WalletManager:
             return {'status': 'error', 'message': f'Wallet {wallet_name} not found'}
         
         # Wrap the status_callback to match the expected signature
-        def callback_wrapper(status: str) -> None:
+        async def callback_wrapper(status: str) -> None:
             if status_callback:
                 status_callback(status, recipient)
         
-        return send_bnb(str(wallet_data['private_key']), recipient, amount, status_callback=callback_wrapper)
+        return await send_bnb(str(wallet_data['private_key']), recipient, amount_wei, status_callback=callback_wrapper)
 
     async def send_token(self, user_id: str, recipient: str, amount: int, token_address: str, pin: Optional[str] = None, status_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:
         """
@@ -315,6 +315,7 @@ class WalletManager:
     def create_wallet(self, user_id: str, wallet_name: str, pin: Optional[str] = None) -> Optional[WalletData]:
         """
         Create a new wallet for a user from their mnemonic.
+        Increments the mnemonic index for the user.
         
         Args:
             user_id: The user ID to create the wallet for
@@ -341,17 +342,11 @@ class WalletManager:
             wallets_all: Dict[str, WalletData] = db_get_user_wallets_with_keys(user_id, pin)
             
             # Determine the next derivation path index
-            max_index: int = -1
-            for wallet_info in wallets_all.values():
-                path_value: Optional[str] = wallet_info.get('derivation_path')
-                if path_value and isinstance(path_value, str) and path_value.startswith("m/44'/60'/0'/0/"):
-                    try:
-                        index: int = int(path_value.split('/')[-1])
-                        max_index = max(max_index, index)
-                    except ValueError:
-                        pass
+            next_index: Union[int, None] = get_user_mnemonic_index(user_id)
+            if next_index is None:
+                logger.error(f"No mnemonic index found for user {user_id}")
+                return None
             
-            next_index: int = max_index + 1
             wallet_derivation_path: str = f"m/44'/60'/0'/0/{next_index}"
             
             # Derive the wallet from the mnemonic
@@ -373,7 +368,7 @@ class WalletManager:
             if not success:
                 logger.error(f"Failed to save wallet '{wallet_name}' for user {user_id}")
                 return None
-            
+
             # If this is the first wallet, set it as active
             if len(wallets_all) == 0:
                 self.set_active_wallet(user_id, wallet_name)
@@ -384,6 +379,9 @@ class WalletManager:
                 'address': new_wallet_data['address'],
                 'derivation_path': new_wallet_data['derivation_path']
             }
+            
+            # Increment the mnemonic index only on success
+            increment_user_mnemonic_index(user_id)
             
             return public_wallet_data
         except Exception as e:
@@ -481,13 +479,13 @@ class WalletManager:
             # Get the wallet data
             wallet_data: Optional[WalletData] = self.get_wallet_by_name(user_id, old_name, pin)
             if not wallet_data:
-                logger.error(f"Wallet '{old_name}' not found for user {user_id}")
+                logger.error(f"Wallet '{old_name}' not found for user {hash_user_id(user_id)}")
                 return False
             
             # Check if a wallet with the new name already exists
             existing_wallet: Optional[WalletData] = self.get_wallet_by_name(user_id, new_name)
             if existing_wallet:
-                logger.error(f"Wallet with name '{new_name}' already exists for user {user_id}")
+                logger.error(f"Wallet with name '{new_name}' already exists for user {hash_user_id(user_id)}")
                 return False
             
             # Update the wallet name in the data
@@ -496,13 +494,13 @@ class WalletManager:
             # Save the wallet with the new name
             success: bool = self.save_user_wallet(user_id, wallet_data, new_name, pin)
             if not success:
-                logger.error(f"Failed to save wallet with new name '{new_name}' for user {user_id}")
+                logger.error(f"Failed to save wallet with new name '{new_name}' for user {hash_user_id(user_id)}")
                 return False
             
             # Delete the old wallet
             success = db_delete_user_wallet(user_id, old_name)
             if not success:
-                logger.error(f"Failed to delete wallet with old name '{old_name}' for user {user_id}")
+                logger.error(f"Failed to delete wallet with old name '{old_name}' for user {hash_user_id(user_id)}")
                 # Don't return False here, since the wallet was saved with the new name
             
             # Check if the renamed wallet was the active wallet
@@ -532,13 +530,13 @@ class WalletManager:
             # Check if the wallet exists
             wallet: Optional[WalletData] = self.get_wallet_by_name(user_id, wallet_name)
             if not wallet:
-                logger.error(f"Wallet '{wallet_name}' not found for user {user_id}")
+                logger.error(f"Wallet '{wallet_name}' not found for user {hash_user_id(user_id)}")
                 return False
             
             # Delete the wallet
             success: bool = db_delete_user_wallet(user_id, wallet_name)
             if not success:
-                logger.error(f"Failed to delete wallet '{wallet_name}' for user {user_id}")
+                logger.error(f"Failed to delete wallet '{wallet_name}' for user {hash_user_id(user_id)}")
                 return False
             
             # If the deleted wallet was the active wallet, set a new active wallet
@@ -551,14 +549,14 @@ class WalletManager:
                     # Set the first available wallet as active
                     new_active_wallet: str = next(iter(wallets))
                     self.set_active_wallet(user_id, new_active_wallet)
-                    logger.info(f"Set new active wallet '{new_active_wallet}' for user {user_id}")
+                    logger.info(f"Set new active wallet '{new_active_wallet}' for user {hash_user_id(user_id)}")
                 else:
                     # No wallets left, clear the active wallet
-                    logger.info(f"No wallets left for user {user_id}, clearing active wallet")
+                    logger.info(f"No wallets left for user {hash_user_id(user_id)}, clearing active wallet")
             
             return True
         except Exception as e:
-            logger.error(f"Error deleting wallet for user {user_id}: {e}")
+            logger.error(f"Error deleting wallet for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return False
         

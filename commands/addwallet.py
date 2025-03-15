@@ -175,7 +175,7 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(
                     f"🎉 New wallet '{wallet_name}' created from your existing seed phrase!\n\n"
                     f"Address: `{new_wallet['address']}`\n\n"
-                    "Use /switch to switch to this wallet.\n\n"
+                    "Use /switch to switch to this wallet. Use /addwallet to create add new wallets.\n\n"
                     "This wallet is derived from your existing seed phrase, which you can recover using /backup.",
                     parse_mode='Markdown'
                 )
@@ -199,8 +199,8 @@ async def process_wallet_name(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(
                     f"🎉 New wallet '{wallet_name}' created with new seed phrase!\n\n"
                     f"Address: `{created_wallet['address']}`\n\n"
-                    f"Use /switch to switch to this wallet.\n\n"
-                    f"This wallet is derived from your existing seed phrase, which you can recover using /backup.",
+                    "Use /switch to switch to this wallet. Use /addwallet to create add new wallets.\n\n"
+                    "This wallet is derived from your existing seed phrase, which you can recover using /backup.",
                     parse_mode='Markdown'
                 )
                 return ConversationHandler.END

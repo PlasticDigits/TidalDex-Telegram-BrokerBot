@@ -7,7 +7,7 @@ import os
 from importlib import import_module
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TypeVar, ContextManager, Generator, cast
 from dotenv import load_dotenv
-
+from db.connections.sqlite3_to_postgresql import convert_sql, adapt_params
 # Load environment variables
 load_dotenv()
 
@@ -137,7 +137,7 @@ def execute_query(query: str, params: Tuple[Any, ...] = (), fetch: Optional[str]
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return None
-        return cast(QueryResult, db_module.execute_query(query, params, fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
+        return cast(QueryResult, db_module.execute_query(convert_sql(query), adapt_params(params), fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
 
 def test_connection() -> bool:
     """
@@ -166,12 +166,12 @@ def init_db() -> bool:
         -- Users table
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
             pin_hash TEXT,
             account_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            settings TEXT
+            active_wallet_id INTEGER DEFAULT 0,
+            mnemonic_index INTEGER DEFAULT 0,
+            settings TEXT,
+            FOREIGN KEY (active_wallet_id) REFERENCES wallets(id) ON DELETE SET NULL
         );
         
         -- Mnemonics table for seed phrases
@@ -241,14 +241,6 @@ def init_db() -> bool:
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
         );
     '''
-    
-    # Adjust SQL syntax for PostgreSQL if needed
-    if DB_TYPE == 'postgresql':
-        # Replace SQLite-specific keywords with PostgreSQL equivalents
-        init_script = init_script.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY')
-        init_script = init_script.replace('INSERT OR IGNORE', 'INSERT')
-        init_script = init_script.replace('NOT IN (SELECT token_address FROM tokens)', 
-                                        'NOT IN (SELECT token_address FROM tokens) ON CONFLICT DO NOTHING')
         
     if DB_TYPE == 'sqlite3':
         return cast(bool, db_module.init_db(DB_PATH, init_script))
@@ -256,7 +248,7 @@ def init_db() -> bool:
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return False
-        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, init_script))
+        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, convert_sql(init_script)))
 
 # Make functions from the underlying database module available
 retry_on_db_lock: Optional[Callable[[int, float], Callable[[F], F]]] = getattr(db_module, 'retry_on_db_lock', None) if DB_TYPE == 'sqlite3' else None

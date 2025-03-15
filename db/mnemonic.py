@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[str] = None) -> bool:
     """
     Save a single mnemonic phrase for a specific user.
+    Resets the mnenmonic index to 0.
     
     Args:
         user_id: The user ID to save the mnemonic for
@@ -36,9 +37,10 @@ def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[st
         return False
 
     # First, create user record if it doesn't exist
+    # Explicitly set active_wallet_id to NULL to avoid foreign key constraint
     logger.debug(f"Ensuring user {user_id_str} exists in users table")
     execute_query(
-        "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+        "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
         (user_id_str,)
     )
         
@@ -48,9 +50,62 @@ def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[st
         "INSERT OR REPLACE INTO mnemonics (user_id, mnemonic) VALUES (?, ?)",
         (user_id_str, encrypted_mnemonic)
     )
+
+    # Reset the mnemonic index to 0
+    logger.debug(f"Resetting mnemonic index for user {user_id_str}")
+    execute_query(
+        "UPDATE users SET mnemonic_index = 0 WHERE user_id = ?",
+        (user_id_str,)
+    )
         
     logger.debug(f"Mnemonic saved successfully for user {user_id_str}")
     return True
+
+def increment_user_mnemonic_index(user_id: Union[int, str]) -> bool:
+    """
+    Increment the mnemonic index for a specific user.
+    """
+    user_id_str: str = hash_user_id(user_id)
+
+    try:
+        result: QueryResult = execute_query(
+            "UPDATE users SET mnemonic_index = mnemonic_index + 1 WHERE user_id = ?",
+            (user_id_str,)
+        )
+        
+        if not result or not isinstance(result, dict):
+            logger.debug(f"No mnemonic index found for user: {user_id_str}")
+            return False
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error incrementing mnemonic index for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False
+    
+
+def get_user_mnemonic_index(user_id: Union[int, str]) -> Optional[int]:
+    """
+    Get the mnemonic index for a specific user.
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result: QueryResult = execute_query(
+            "SELECT mnemonic_index FROM users WHERE user_id = ?",
+            (user_id_str,),
+            fetch='one'
+        )
+        
+        if not result or not isinstance(result, dict):
+            logger.debug(f"No mnemonic index found for user: {user_id_str}")
+            return None
+        
+        return cast(Optional[int], result['mnemonic_index'])
+    except Exception as e:
+        logger.error(f"Error getting mnemonic index for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return None
 
 def get_user_mnemonic(user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """

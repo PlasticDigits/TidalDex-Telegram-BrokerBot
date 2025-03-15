@@ -26,6 +26,7 @@ class WalletData(TypedDict, total=False):
     is_active: bool
     imported: bool
     created_at: Optional[float]
+    id: Optional[int]  # Database ID for the wallet
 
 def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None, pin: Optional[str] = None) -> Optional[WalletData]:
     """
@@ -53,10 +54,14 @@ def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None,
                 fetch='one'
             )
         else:
-            # Otherwise, get the active wallet
+            # Get the active wallet using active_wallet_id from the users table
             logger.debug(f"Querying active wallet for user: {user_id_str}")
             result = execute_query(
-                "SELECT * FROM wallets WHERE user_id = ? AND is_active = 1",
+                """
+                SELECT w.* FROM wallets w
+                JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
+                WHERE u.user_id = ?
+                """,
                 (user_id_str,),
                 fetch='one'
             )
@@ -152,7 +157,7 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
         # First, create user record if it doesn't exist
         logger.debug(f"Ensuring user {user_id_str} exists in users table")
         execute_query(
-            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+            "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
             (user_id_str,)
         )
         
@@ -225,21 +230,8 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
             
             logger.debug(f"New wallet {wallet_name} created for user {user_id_str}")
         
-        # If this is the first wallet, or if it's explicitly set as active
-        if wallet_copy.get('is_active'):
-            set_active_wallet(user_id, wallet_name)
-        else:
-            # Check if user has any active wallets
-            active_wallet: QueryResult = execute_query(
-                "SELECT name FROM wallets WHERE user_id = ? AND is_active = 1",
-                (user_id_str,),
-                fetch='one'
-            )
-            
-            if not active_wallet or not isinstance(active_wallet, dict):
-                # If no active wallet, set this one as active
-                logger.debug(f"No active wallet found for user {user_id_str}, setting {wallet_name} as active")
-                set_active_wallet(user_id, wallet_name)
+        # Newly created wallets always set to active.
+        set_active_wallet(user_id, wallet_name)
         
         return True
     except Exception as e:
@@ -265,22 +257,34 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
         # If wallet_name is provided, delete that specific wallet
         if wallet_name:
             logger.debug(f"Deleting specific wallet {wallet_name} for user: {user_id_str}")
+            
+            # Check if this is the active wallet
+            active_wallet_id: Optional[int] = get_active_wallet_id(user_id)
+            
+            # Get the wallet ID for the wallet being deleted
+            wallet_info: QueryResult = execute_query(
+                "SELECT id FROM wallets WHERE user_id = ? AND name = ?",
+                (user_id_str, wallet_name),
+                fetch='one'
+            )
+            
+            if not wallet_info or not isinstance(wallet_info, dict):
+                logger.error(f"Wallet {wallet_name} not found for user {user_id_str}")
+                return False
+                
+            was_active = active_wallet_id == wallet_info.get('id')
+            
+            # Delete the wallet
             execute_query(
                 "DELETE FROM wallets WHERE user_id = ? AND name = ?",
                 (user_id_str, wallet_name)
             )
             
             # If this was the active wallet, set another wallet as active if possible
-            was_active: QueryResult = execute_query(
-                "SELECT COUNT(*) as count FROM wallets WHERE user_id = ? AND is_active = 0",
-                (user_id_str,),
-                fetch='one'
-            )
-            
-            if was_active and isinstance(was_active, dict) and was_active['count'] > 0:
+            if was_active:
                 # There are other wallets, set the first one as active
                 new_active: QueryResult = execute_query(
-                    "SELECT name FROM wallets WHERE user_id = ? LIMIT 1",
+                    "SELECT id, name FROM wallets WHERE user_id = ? LIMIT 1",
                     (user_id_str,),
                     fetch='one'
                 )
@@ -288,14 +292,19 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 if new_active and isinstance(new_active, dict):
                     logger.debug(f"Setting wallet {new_active['name']} as active for user: {user_id_str}")
                     execute_query(
-                        "UPDATE wallets SET is_active = 1 WHERE user_id = ? AND name = ?",
-                        (user_id_str, new_active['name'])
+                        "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+                        (new_active['id'], user_id_str)
                     )
         else:
             # Delete the active wallet
             logger.debug(f"Deleting active wallet for user: {user_id_str}")
             active_wallet: QueryResult = execute_query(
-                "SELECT name FROM wallets WHERE user_id = ? AND is_active = 1",
+                """
+                SELECT w.name 
+                FROM wallets w
+                JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
+                WHERE u.user_id = ?
+                """,
                 (user_id_str,),
                 fetch='one'
             )
@@ -308,7 +317,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 
                 # Set another wallet as active if possible
                 another_active: QueryResult = execute_query(
-                    "SELECT name FROM wallets WHERE user_id = ? LIMIT 1",
+                    "SELECT id, name FROM wallets WHERE user_id = ? LIMIT 1",
                     (user_id_str,),
                     fetch='one'
                 )
@@ -316,8 +325,8 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 if another_active and isinstance(another_active, dict):
                     logger.debug(f"Setting wallet {another_active['name']} as active for user: {user_id_str}")
                     execute_query(
-                        "UPDATE wallets SET is_active = 1 WHERE user_id = ? AND name = ?",
-                        (user_id_str, another_active['name'])
+                        "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+                        (another_active['id'], user_id_str)
                     )
             else:
                 logger.debug(f"No active wallet found for user: {user_id_str}")
@@ -329,6 +338,36 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
         logger.error(f"Error deleting wallet for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
         return False
+    
+def get_active_wallet_id(user_id: Union[int, str]) -> Optional[int]:
+    """
+    Get the ID of the active wallet for a user.
+    
+    Args:
+        user_id: The user ID to get the active wallet for
+        
+    Returns:
+        The ID of the active wallet or None if no active wallet is found
+    """
+    # Hash the user ID for database lookup
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result: QueryResult = execute_query(
+            "SELECT active_wallet_id FROM users WHERE user_id = ?",
+            (user_id_str,),
+            fetch='one'
+        )
+
+        if result and isinstance(result, dict) and 'active_wallet_id' in result:
+            return cast(Optional[int], result['active_wallet_id'])
+        else:
+            return None
+    except Exception as e:
+        logger.error(f"Error getting active wallet ID for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return None
+    
 
 def has_user_wallet(user_id: Union[int, str], pin: Optional[str] = None) -> bool:
     """
@@ -373,8 +412,16 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
     
     try:
         logger.debug(f"Querying all wallets for user: {user_id_str}")
+        
+        # First get the active wallet ID from the users table
+        active_wallet_id: Optional[int] = get_active_wallet_id(user_id)
+
+        if active_wallet_id is None:
+            active_wallet_id = 0
+        
+        # Now get all wallets
         results: QueryResult = execute_query(
-            "SELECT name, address, path, is_active, imported, created_at FROM wallets WHERE user_id = ?",
+            "SELECT id, name, address, path, imported, created_at FROM wallets WHERE user_id = ?",
             (user_id_str,),
             fetch='all'
         )
@@ -383,7 +430,7 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
             logger.debug(f"No wallets found for user: {user_id_str}")
             return {}
         
-        # Process each wallet to remove private keys
+        # Process each wallet to remove private keys and mark active wallet
         wallets: Dict[str, WalletData] = {}
         if isinstance(results, list):
             for result in results:
@@ -393,6 +440,11 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
                 wallet: WalletData = cast(WalletData, dict(result))
                 if 'path' in wallet:
                     wallet['derivation_path'] = wallet.pop('path')
+                
+                # Mark as active if this wallet's id matches the active_wallet_id
+                wallet_id = wallet.pop('id', None)  # Remove id from the result
+                wallet['is_active'] = (wallet_id == active_wallet_id)
+                
                 if 'name' in wallet:
                     wallet_name = wallet['name']
                     wallets[wallet_name] = wallet
@@ -423,27 +475,21 @@ def set_active_wallet(user_id: Union[int, str], wallet_name: str) -> bool:
     user_id_str: str = hash_user_id(user_id)
     
     try:
-        # Check if the wallet exists
-        wallet_exists: QueryResult = execute_query(
-            "SELECT name FROM wallets WHERE user_id = ? AND name = ?",
+        # Check if the wallet exists and get its ID
+        wallet_info: QueryResult = execute_query(
+            "SELECT id FROM wallets WHERE user_id = ? AND name = ?",
             (user_id_str, wallet_name),
             fetch='one'
         )
         
-        if not wallet_exists or not isinstance(wallet_exists, dict):
+        if not wallet_info or not isinstance(wallet_info, dict) or 'id' not in wallet_info:
             logger.error(f"Cannot set non-existent wallet '{wallet_name}' as active for user {user_id_str}")
             return False
         
-        # First, set all wallets as inactive
+        # Update the active_wallet_id in the users table
         execute_query(
-            "UPDATE wallets SET is_active = 0 WHERE user_id = ?",
-            (user_id_str,)
-        )
-        
-        # Then, set the specified wallet as active
-        execute_query(
-            "UPDATE wallets SET is_active = 1 WHERE user_id = ? AND name = ?",
-            (user_id_str, wallet_name)
+            "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+            (wallet_info['id'], user_id_str)
         )
         
         logger.debug(f"Wallet '{wallet_name}' set as active for user {user_id_str}")
@@ -507,7 +553,12 @@ def rename_wallet(user_id: Union[int, str], new_name: str) -> Tuple[bool, str]:
         
         # Get active wallet
         active_wallet: QueryResult = execute_query(
-            "SELECT id, name FROM wallets WHERE user_id = ? AND is_active = 1", 
+            """
+            SELECT w.id, w.name 
+            FROM wallets w
+            JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
+            WHERE u.user_id = ?
+            """, 
             (user_id_str,),
             fetch='one'
         )
@@ -641,7 +692,12 @@ def get_active_wallet_name(user_id: Union[int, str]) -> Optional[str]:
     try:
         logger.debug(f"Querying active wallet name for user: {user_id_str}")
         result: QueryResult = execute_query(
-            "SELECT name FROM wallets WHERE user_id = ? AND is_active = 1",
+            """
+            SELECT w.name 
+            FROM wallets w
+            JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
+            WHERE u.user_id = ?
+            """,
             (user_id_str,),
             fetch='one'
         )

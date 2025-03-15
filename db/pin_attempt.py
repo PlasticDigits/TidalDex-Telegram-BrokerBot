@@ -94,7 +94,7 @@ def save_pin_attempt_data(user_id: Union[int, str], failure_count: int, last_att
     try:
         # First ensure user exists in users table
         execute_query(
-            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+            "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
             (user_id_str,)
         )
         

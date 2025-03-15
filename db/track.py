@@ -280,7 +280,7 @@ def get_all_tracked_tokens_with_wallets() -> List[Dict[str, Any]]:
     Used for syncing balances with blockchain.
     
     Returns:
-        List of tokens with tracking and user wallet data
+        List of tokens with tracking and user wallet data for all wallets
     """
     try:
         result: QueryResult = execute_query(
@@ -296,7 +296,6 @@ def get_all_tracked_tokens_with_wallets() -> List[Dict[str, Any]]:
             FROM user_tracked_tokens utt
             JOIN tokens t ON utt.token_id = t.id
             JOIN wallets w ON utt.user_id = w.user_id
-            WHERE w.is_active = 1
             """,
             fetch='all'
         )

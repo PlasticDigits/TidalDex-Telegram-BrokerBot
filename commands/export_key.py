@@ -11,6 +11,7 @@ from utils.self_destruction_message import send_self_destructing_message
 from services.pin import require_pin, pin_manager
 from services.wallet import wallet_manager
 from db.wallet import WalletData
+from db.utils import hash_user_id
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # For wallet manager, we need the user ID as a string
     user_id_str: str = str(user_id_int)
     
-    logger.info(f"Export key command called by user {user_id_int}")
+    logger.info(f"Export key command called by user {hash_user_id(user_id_str)}")
     
     try:
         # Get PIN from PINManager - needs integer user_id
@@ -39,7 +40,7 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(user_id_str, wallet_name, pin)
         
         if update.message is None:
-            logger.error(f"No message in update for user {user_id_int}")
+            logger.error(f"No message in update for user {hash_user_id(user_id_str)}")
             return
             
         if not user_wallet:
@@ -91,7 +92,7 @@ async def export_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "This message will self-destruct for your security.",
             parse_mode='Markdown'
         )
-        logger.info(f"Private key successfully displayed to user {user_id_int}")
+        logger.info(f"Private key successfully displayed to user {hash_user_id(user_id_str)}")
         
     except Exception as e:
         logger.error(f"Error in export_key_command: {e}")

@@ -119,7 +119,7 @@ async def process_new_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         await message.reply_text(
             f"❌ Failed to rename wallet from '{current_wallet_name}' to '{new_name}'.\n"
-            "Please try again later."
+            f"Try a different name or use /addwallet to create a new wallet.\n"
         )
     
     # Clear the stored wallet name

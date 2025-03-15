@@ -42,7 +42,6 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Create a keyboard with all wallets
     keyboard: List[List[InlineKeyboardButton]] = []
-    logger.info(f"User wallets: {user_wallets}")
     for wallet_name, wallet_data in user_wallets.items():
         logger.info(f"Wallet: {wallet_name}")
         is_active: bool = wallet_data.get('is_active', False)
@@ -118,7 +117,7 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(
             f"✅ Wallet '{selected_wallet_name}' is now active.\n\n"
             f"Address: `{address}`\n\n"
-            f"Use /wallet to see details, /addwallet to add a new wallet, or /send to send funds.",
+            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds.",
             parse_mode='Markdown'
         )
     else:
