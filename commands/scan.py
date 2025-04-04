@@ -9,8 +9,9 @@ from web3 import Web3
 from web3.types import ChecksumAddress # type: ignore[attr-defined]
 
 from services import token_manager
-from services.wallet import get_active_wallet_name, get_wallet_by_name
+from services.wallet import wallet_manager
 from services.pin import require_pin, pin_manager
+from db.wallet import WalletData
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -23,22 +24,18 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not user:
         logger.error("Effective user is None in scan_command")
         return
-        
-    user_id: int = user.id
     
-    # Get PIN from PIN manager
-    pin: Optional[str] = pin_manager.get_pin(user_id)
-    if not pin:
-        message: Optional[Message] = update.message
-        if message:
-            await message.reply_text(
-                "Error: PIN verification failed. Please try again."
-            )
-        return
+    # Get the user ID as an integer (native type from Telegram)
+    user_id_int: int = update.effective_user.id
+    # For wallet manager, we need the user ID as a string
+    user_id_str: str = str(user_id_int)
     
-    # Verify the user has a wallet
-    wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
-    if not wallet_name:
+    # Get active wallet name and use pin_manager for PIN
+    wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(user_id_str)
+    pin: Optional[str] = pin_manager.get_pin(user_id_int)
+    user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(user_id_str, wallet_name, pin)
+    
+    if not wallet_name or not user_wallet:
         message: Optional[Message] = update.message
         if message:
             await message.reply_text(
@@ -46,24 +43,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         return
     
-    # Get wallet address with PIN
-    wallet = get_wallet_by_name(str(user_id), wallet_name, pin)
-    if not wallet:
-        message2: Optional[Message] = update.message
-        if message2:
-            await message2.reply_text(
-                "Error: Could not find your wallet. Please try again later."
-            )
-        return
-    
-    wallet_address: str = wallet.get('address', '')
-    if not wallet_address:
-        message3: Optional[Message] = update.message
-        if message3:
-            await message3.reply_text(
-                "Error: Invalid wallet address. Please try again later."
-            )
-        return
+    wallet_address: str = user_wallet['address']
     
     # Send initial message
     message4: Optional[Message] = update.message
@@ -75,7 +55,7 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     try:
         # Scan for tokens
-        newly_tracked: Sequence[ChecksumAddress] = await token_manager.scan(str(user_id))
+        newly_tracked: Sequence[ChecksumAddress] = await token_manager.scan(user_id_str)
         
         if not newly_tracked:
             message5: Optional[Message] = update.message

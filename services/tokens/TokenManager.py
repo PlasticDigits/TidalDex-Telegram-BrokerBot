@@ -19,6 +19,7 @@ from db.tokens import (
 )
 from db.track import get_token_balance_history as db_get_token_balance_history
 from services.wallet import wallet_manager
+from services.pin import pin_manager
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,23 @@ class TokenManager:
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load ERC20 ABI: {str(e)}")
             raise RuntimeError("Failed to load ERC20 ABI") from e
+
+    def _get_user_pin(self, user_id: str) -> Optional[str]:
+        """Get the PIN for a user if they have one set.
+        
+        Args:
+            user_id: The user ID to get the PIN for
+            
+        Returns:
+            Optional[str]: The user's PIN if they have one set, None otherwise
+        """
+        try:
+            # Convert user_id to int for pin_manager
+            user_id_int = int(user_id)
+            return pin_manager.get_pin(user_id_int)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Failed to get PIN for user {user_id}: {str(e)}")
+            return None
 
     async def get_tracked_tokens(self, user_id: str, chain_id: int = 56) -> List[TokenInfo]:
         """Get all tracked tokens for a specific user.
@@ -216,7 +234,13 @@ class TokenManager:
             logger.error(f"No active wallet found for user {user_id}")
             return newly_tracked
             
-        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name)
+        # Get user's PIN
+        pin = self._get_user_pin(user_id)
+        if not pin and pin_manager.needs_pin(int(user_id)):
+            logger.error(f"PIN required but not available for user {user_id}")
+            return newly_tracked
+            
+        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet:
             logger.error(f"Wallet {wallet_name} not found for user {user_id}")
             return newly_tracked
@@ -256,7 +280,13 @@ class TokenManager:
             logger.error(f"No active wallet found for user {user_id}")
             return {}
             
-        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name)
+        # Get user's PIN
+        pin = self._get_user_pin(user_id)
+        if not pin and pin_manager.needs_pin(int(user_id)):
+            logger.error(f"PIN required but not available for user {user_id}")
+            return {}
+            
+        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet:
             logger.error(f"Wallet {wallet_name} not found for user {user_id}")
             return {}
