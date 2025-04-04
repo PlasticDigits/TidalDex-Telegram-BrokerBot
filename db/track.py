@@ -132,7 +132,7 @@ def track_token(user_id: Union[int, str], token_id: int) -> Optional[int]:
     Returns:
         The ID of the tracking entry or None on failure
     """
-    user_id_str: str = hash_user_id(user_id) if isinstance(user_id, int) else str(user_id)
+    user_id_str: str = str(hash_user_id(user_id))
     
     try:
         # Check if token is already tracked by this user

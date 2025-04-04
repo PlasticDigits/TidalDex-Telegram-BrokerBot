@@ -1,304 +1,208 @@
 """
-Track command module.
+Command for tracking token balances.
 """
 import logging
-import traceback
-from typing import Dict, Any, Optional, List, Union, cast
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, User, Message, MaybeInaccessibleMessage
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, ExtBot, CallbackContext
+from typing import List, Dict, Any, Optional, Union, Callable, TypeVar, Awaitable, cast
 
-from db.connections.connection import QueryResult
-from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
-from db import QueryResult
-from db.connection import execute_query
-from db.track import get_user_tracked_tokens, get_token_by_address, add_token, track_token, record_token_balance
-from services.wallet import get_active_wallet_name, get_wallet_by_name, get_wallet_balance
-from db.wallet import WalletData
-from web3 import Web3
-from utils.token_utils import get_token_info
-
-# Define conversation states
-TOKEN_INPUT = 1
+from services import token_manager
+from services.wallet import get_active_wallet_name, get_wallet_by_name
+from utils.token_utils import get_token_info, format_token_balance
+from utils.web3_connection import w3
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
+# Define conversation states
+TOKEN_INPUT = 1
+TOKEN_CONFIRMATION = 2
+
+# Type variable for handler functions
+HandlerType = TypeVar('HandlerType', bound=Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[int]])
+
 async def track_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Start the process of tracking a token's balance.
-    Ask the user to input a token address or symbol.
+    Start the process of tracking a new token.
     """
-    if not update.effective_user:
-        logger.error("No effective user found in update")
+    user: Optional[User] = update.effective_user
+    if not user:
         return ConversationHandler.END
         
-    user_id: int = update.effective_user.id
+    user_id: int = user.id
     
     # Verify the user has a wallet
     wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
     if not wallet_name:
-        if not update.message:
-            logger.error("No message found in update")
-            return ConversationHandler.END
-        await update.message.reply_text(
-            "You need to create a wallet first before tracking tokens. Use /wallet to create one."
-        )
+        user_message: Optional[Message] = update.message
+        if user_message:
+            await user_message.reply_text(
+                "You need to create a wallet first to track tokens. Use /wallet to create one."
+            )
         return ConversationHandler.END
     
-    # Get existing tracked tokens for the user
-    tracked_tokens: QueryResult = get_user_tracked_tokens(str(user_id))
-    
-    # Display currently tracked tokens
-    if tracked_tokens and isinstance(tracked_tokens, list) and len(tracked_tokens) > 0:
-        # Ensure each token in the list is a dictionary
-        tokens_list: str = "\n".join([
-            f"• {t.get('token_symbol', 'Unknown')} ({t.get('token_name', 'Unknown')}): {t.get('token_address')}" 
-            for t in tracked_tokens if isinstance(t, dict)
-        ])
-        if not update.message:
-            logger.error("No message found in update")
-            return ConversationHandler.END
-        await update.message.reply_text(
-            f"You are currently tracking these tokens:\n\n{tokens_list}\n\n"
-            "To track a new token, please enter the token address or symbol."
-        )
-    else:
-        if not update.message:
-            logger.error("No message found in update")
-            return ConversationHandler.END
-        await update.message.reply_text(
-            "You are not tracking any tokens yet.\n\n"
-            "Please enter the token address or symbol you want to track."
+    user_message2: Optional[Message] = update.message
+    if user_message2:
+        await user_message2.reply_text(
+            "Please enter the token address you want to track.\n"
+            "You can find this on BscScan or other blockchain explorers."
         )
     
     return TOKEN_INPUT
 
-async def process_token_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def process_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Process the token address or symbol input from the user.
-    Validate the token and add it to tracked tokens.
+    Process the entered token address and show token information for confirmation.
     """
-    if not update.effective_user or not update.message:
-        logger.error("No effective user or message found in update")
+    user: Optional[User] = update.effective_user
+    if not user:
         return ConversationHandler.END
         
-    user_id: int = update.effective_user.id
-    message_text: Optional[str] = update.message.text
-    if not message_text:
-        logger.error("No message text found")
+    user_id: int = user.id
+    message: Optional[Message] = update.message
+    if not message:
         return ConversationHandler.END
         
-    token_input: str = message_text.strip()
-    
-    await update.message.reply_text("Validating token... Please wait.")
-    
-    # Validate if this is a token address
-    if Web3.is_address(token_input):
-        token_address: str = Web3.to_checksum_address(token_input)
-        
-        # Check if token exists in tokens table
-        token: Optional[Dict[str, Any]] = get_token_by_address(token_address)
-        
-        token_id: Optional[int] = None
-        token_symbol: str = 'Unknown'
-        token_name: str = 'Unknown'
-        
-        # If token doesn't exist, get info and add it
-        if not token:
-            # Validate token and get info
-            try:
-                token_info: Optional[Dict[str, Any]] = await get_token_info(token_address)
-                
-                if not token_info:
-                    await update.message.reply_text(
-                        "Could not validate this token address. Please check the address and try again."
-                    )
-                    return ConversationHandler.END
-                    
-                if not isinstance(token_info, dict):
-                    logger.error(f"Unexpected token info format: {type(token_info)}")
-                    await update.message.reply_text(
-                        "Error processing token information. Please try again later."
-                    )
-                    return ConversationHandler.END
-                    
-                token_symbol = token_info.get('symbol', 'Unknown')
-                token_name = token_info.get('name', 'Unknown')
-                token_decimals: int = token_info.get('decimals', 18)
-                
-                # Add to tokens table
-                token_id = add_token(token_address, token_symbol, token_name, token_decimals)
-                
-                if not token_id:
-                    await update.message.reply_text(
-                        "Error adding the token. Please try again later."
-                    )
-                    return ConversationHandler.END
-                
-            except Exception as e:
-                logger.error(f"Error validating token {token_input}: {e}")
-                await update.message.reply_text(
-                    "Error validating token. Please check the address and try again."
-                )
-                return ConversationHandler.END
-        else:
-            # Token already exists in the database
-            if not isinstance(token, dict):
-                logger.error(f"Unexpected token info format: {type(token)}")
-                await update.message.reply_text(
-                    "Error processing token information. Please try again later."
-                )
-                return ConversationHandler.END
-                
-            token_id = token.get('id')
-            token_symbol = token.get('token_symbol', 'Unknown')
-            token_name = token.get('token_name', 'Unknown')
-        
-        if not token_id:
-            await update.message.reply_text(
-                "Error: Could not get token ID. Please try again later."
-            )
-            return ConversationHandler.END
-            
-        # Add token to user's tracked tokens
-        tracking_id: Optional[int] = track_token(str(user_id), token_id)
-        
-        if not tracking_id:
-            await update.message.reply_text(
-                "Error tracking the token. Please try again later."
-            )
-            return ConversationHandler.END
-        
-        # Get initial balance
-        wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
-        if not wallet_name:
-            await update.message.reply_text(
-                "Error: No active wallet found. Please try again later."
-            )
-            return ConversationHandler.END
-            
-        wallet: Optional[WalletData] = get_wallet_by_name(str(user_id), wallet_name, None)
-        if not wallet:
-            await update.message.reply_text(
-                "Error: Could not get wallet information. Please try again later."
-            )
-            return ConversationHandler.END
-            
-        # Ensure wallet is treated as a dictionary
-        wallet_dict = cast(Dict[str, Any], wallet)
-        wallet_address = wallet_dict.get('address', '')
-        if not wallet_address:
-            await update.message.reply_text(
-                "Error: Invalid wallet address. Please try again later."
-            )
-            return ConversationHandler.END
-            
-        # Get token balance
-        balance: float = await get_wallet_balance(wallet_address, token_address)
-        # Record balance
-        await record_token_balance_wrapper(str(user_id), token_id, token_address, wallet_address, balance)
-        
-        await update.message.reply_text(
-            f"You are now tracking the token: {token_symbol} ({token_name})\n"
-            f"Address: {token_address}\n\n"
-            "Your balance will be periodically recorded."
-        )
-        
+    # Get the token address from the message text
+    token_address = message.text
+    if not token_address:
+        await message.reply_text("Please provide a token address.")
         return ConversationHandler.END
+        
+    # Remove any whitespace
+    token_address = token_address.strip() if token_address else ""
     
-    else:
-        # Later could implement symbol lookup
-        await update.message.reply_text(
-            "Please enter a valid token address (0x...).\n"
-            "Symbol lookup is not supported yet."
+    # Get token info
+    token_info: Optional[Dict[str, Any]] = await get_token_info(token_address)
+    
+    if not token_info:
+        await message.reply_text(
+            "Invalid token address or token not found.\n"
+            "Please enter a valid BEP-20 token address."
         )
         return TOKEN_INPUT
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the conversation."""
-    if not update.message:
-        logger.error("No message found in update")
-        return ConversationHandler.END
-    await update.message.reply_text(
-        "Token tracking canceled."
-    )
-    return ConversationHandler.END
-
-async def record_token_balance_wrapper(
-    user_id: str, 
-    token_id: int, 
-    token_address: Optional[str] = None, 
-    wallet_address: Optional[str] = None, 
-    balance: Optional[float] = None
-) -> bool:
-    """
-    Wrapper for recording token balance that handles fetching wallet and balance if needed.
     
-    Args:
-        user_id (str): Telegram user ID as string
-        token_id (int): Token ID from tokens table
-        token_address (str, optional): Token contract address, required if balance is None
-        wallet_address (str, optional): Wallet address, fetched from active wallet if None
-        balance (float, optional): Balance to record, fetched from blockchain if None
-        
-    Returns:
-        bool: True if successful, False otherwise
+    symbol: str = token_info.get('symbol', 'Unknown')
+    name: str = token_info.get('name', 'Unknown')
+    decimals: int = token_info.get('decimals', 18)
+    
+    # Check if token is already being tracked
+    is_tracked: bool = await token_manager.is_token_tracked(str(user_id), token_address)
+    
+    if is_tracked:
+        await message.reply_text(
+            f"You are already tracking {symbol} ({name}).\n"
+            "Use /track_view to see your tracked tokens."
+        )
+        return ConversationHandler.END
+    
+    # Store token info in context for confirmation
+    if context.user_data is not None:
+        context.user_data['tracking_token'] = {
+            'address': token_address,
+            'symbol': symbol,
+            'name': name,
+            'decimals': decimals
+        }
+    
+    # Create confirmation keyboard
+    keyboard: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("Yes, track this token", callback_data="confirm_track")],
+        [InlineKeyboardButton("No, cancel", callback_data="cancel_track")]
+    ]
+    
+    reply_markup: InlineKeyboardMarkup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        f"Token Information:\n\n"
+        f"Name: {name}\n"
+        f"Symbol: {symbol}\n"
+        f"Decimals: {decimals}\n"
+        f"Address: {token_address}\n\n"
+        f"Do you want to track this token?",
+        reply_markup=reply_markup
+    )
+    
+    return TOKEN_CONFIRMATION
+
+async def process_tracking_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
+    Process the user's confirmation to track the token.
+    """
+    query: Optional[CallbackQuery] = update.callback_query
+    if not query:
+        return ConversationHandler.END
+        
+    await query.answer()
+    
+    callback_data: Optional[str] = query.data
+    if not callback_data:
+        return ConversationHandler.END
+    
+    if callback_data == "cancel_track":
+        await query.edit_message_text("Token tracking canceled.")
+        return ConversationHandler.END
+    
+    user: Optional[User] = update.effective_user
+    if not user:
+        return ConversationHandler.END
+        
+    user_id: int = user.id
+    
+    # Get token info from context
+    token_info: Optional[Dict[str, Any]] = None
+    if context.user_data is not None:
+        token_info = context.user_data.get('tracking_token', {})
+        
+    if not token_info:
+        await query.edit_message_text("Error: Token information lost. Please try again.")
+        return ConversationHandler.END
+    
+    token_address: str = token_info.get('address', '')
+    symbol: str = token_info.get('symbol', 'Unknown')
+    name: str = token_info.get('name', 'Unknown')
+    
     try:
-        # If wallet_address is not provided, get it from the active wallet
-        if wallet_address is None:
-            wallet_name: Optional[str] = get_active_wallet_name(user_id)
-            if not wallet_name:
-                logger.error(f"No active wallet for user {user_id}")
-                return False
-                
-            wallet: Optional[WalletData] = get_wallet_by_name(user_id, wallet_name, None)
-            if not wallet:
-                logger.error(f"Could not get wallet for user {user_id}")
-                return False
-                
-            # Ensure wallet is treated as a dictionary
-            wallet_dict = cast(Dict[str, Any], wallet)
-            wallet_address = wallet_dict.get('address', '')
-            if not wallet_address:
-                logger.error(f"Invalid wallet address for user {user_id}")
-                return False
+        # Track the token
+        await token_manager.track(str(user_id), token_address)
         
-        # If token_address is not provided but balance is None, get it from the token_id
-        if balance is None:
-            if token_address is None:
-                token_info: QueryResult = execute_query(
-                    "SELECT token_address FROM tokens WHERE id = ?",
-                    (str(token_id),),
-                    fetch='one'
-                )
-                if not token_info:
-                    logger.error(f"Token not found with ID {token_id}")
-                    return False
-                if not isinstance(token_info, dict):
-                    logger.error(f"Unexpected token info format for token ID {token_id}")
-                    return False
-                token_address = token_info.get('token_address', '')
-                if not token_address:
-                    logger.error(f"Invalid token address for token ID {token_id}")
-                    return False
-            
-            # Get token balance
-            balance = await get_wallet_balance(wallet_address, token_address)
+        await query.edit_message_text(
+            f"Successfully started tracking {symbol} ({name}).\n"
+            f"Use /track_view to see your token balances."
+        )
         
-        # Record balance
-        return record_token_balance(user_id, token_id, wallet_address, int(balance))
+        return ConversationHandler.END
         
     except Exception as e:
-        logger.error(f"Error recording token balance: {e}")
-        return False
+        logger.error(f"Error tracking token {token_address}: {e}")
+        await query.edit_message_text(
+            f"Error tracking {symbol} ({name}).\n"
+            "Please try again later."
+        )
+        return ConversationHandler.END
+
+# Define a simple async function for the cancel command
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Cancel the conversation.
+    """
+    message: Optional[Message] = update.message
+    if message:
+        await message.reply_text("Command canceled.")
+    return ConversationHandler.END
 
 # Setup conversation handler
 track_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("track", track_command)],
     states={
         TOKEN_INPUT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, process_token_input)
+            CallbackQueryHandler(process_token_address)
+        ],
+        TOKEN_CONFIRMATION: [
+            CallbackQueryHandler(process_tracking_confirmation, pattern=r"^(confirm|cancel)_track$")
         ],
     },
-    fallbacks=[CommandHandler("cancel", cancel)]
+    fallbacks=[
+        CommandHandler("cancel", cancel_command)
+    ]
 ) 

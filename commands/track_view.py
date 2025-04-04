@@ -6,8 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Callbac
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, ExtBot, CallbackContext
 from typing import List, Dict, Any, Optional, Union, Callable, TypeVar, Awaitable, cast
 
-from db.connection import execute_query
-from db.track import get_user_tracked_tokens, get_tracked_token_by_id, get_token_balance_history
+from services import token_manager
 from services.wallet import get_active_wallet_name, get_wallet_by_name
 from utils.token_utils import get_token_balance, get_token_info, format_token_balance
 
@@ -43,9 +42,9 @@ async def track_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     
     # Get existing tracked tokens for the user
-    tracked_tokens: List[Dict[str, Any]] = get_user_tracked_tokens(str(user_id))
+    tracked_tokens = await token_manager.get_tracked_tokens(str(user_id))
     
-    if not tracked_tokens or len(tracked_tokens) == 0:
+    if not tracked_tokens:
         user_message2: Optional[Message] = update.message
         if user_message2:
             await user_message2.reply_text(
@@ -57,16 +56,16 @@ async def track_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Create keyboard with token options
     keyboard: List[List[InlineKeyboardButton]] = []
     for token in tracked_tokens:
-        tracking_id: Optional[int] = token.get('id')
-        if tracking_id is None:
+        token_address = token.get('token_address')
+        if not token_address:
             continue
             
-        symbol: str = token.get('token_symbol', 'Unknown')
-        name: str = token.get('token_name', 'Unknown')
+        symbol: str = token.get('symbol', 'Unknown')
+        name: str = token.get('name', 'Unknown')
         
-        # Add a button for each token, with the tracking ID as callback data
+        # Add a button for each token, with the token address as callback data
         keyboard.append([
-            InlineKeyboardButton(f"{symbol} ({name})", callback_data=f"view_token_{tracking_id}")
+            InlineKeyboardButton(f"{symbol} ({name})", callback_data=f"view_token_{token_address}")
         ])
     
     # Add a cancel button
@@ -93,7 +92,7 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
         
     await query.answer()
     
-    # Extract token ID from callback data
+    # Extract token address from callback data
     callback_data: Optional[str] = query.data
     if not callback_data:
         return ConversationHandler.END
@@ -102,8 +101,8 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("Token view canceled.")
         return ConversationHandler.END
     
-    # Extract tracking ID from callback_data (format: "view_token_{id}")
-    tracking_id_str: str = callback_data.split("_")[-1]
+    # Extract token address from callback_data (format: "view_token_{address}")
+    token_address = callback_data.split("_")[-1]
     
     user: Optional[User] = update.effective_user
     if not user:
@@ -112,25 +111,15 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
     user_id: int = user.id
     
     # Get token info
-    token_info: Optional[Dict[str, Any]] = get_tracked_token_by_id(int(tracking_id_str))
+    token_info: Optional[Dict[str, Any]] = await get_token_info(token_address)
     
     if not token_info:
         await query.edit_message_text("Error: Token not found. Please try again.")
         return ConversationHandler.END
     
-    token_id: Optional[int] = token_info.get('token_id')
-    if token_id is None:
-        await query.edit_message_text("Error: Token ID is missing. Please try again.")
-        return ConversationHandler.END
-        
-    token_address: Optional[str] = token_info.get('token_address')
-    if not token_address:
-        await query.edit_message_text("Error: Token address is missing. Please try again.")
-        return ConversationHandler.END
-        
-    symbol: str = token_info.get('token_symbol', 'Unknown')
-    name: str = token_info.get('token_name', 'Unknown')
-    decimals: int = token_info.get('token_decimals', 18)
+    symbol: str = token_info.get('symbol', 'Unknown')
+    name: str = token_info.get('name', 'Unknown')
+    decimals: int = token_info.get('decimals', 18)
     
     # Get wallet info
     wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
@@ -152,8 +141,6 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
         # Store token info in context for history view
         if context.user_data is not None:
             context.user_data['viewing_token'] = {
-                'tracking_id': tracking_id_str,
-                'token_id': token_id,
                 'address': token_address,
                 'symbol': symbol,
                 'name': name,
@@ -162,7 +149,7 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
         
         # Create keyboard for viewing history
         keyboard: List[List[InlineKeyboardButton]] = [
-            [InlineKeyboardButton("View Balance History", callback_data=f"history_{tracking_id_str}")],
+            [InlineKeyboardButton("View Balance History", callback_data=f"history_{token_address}")],
             [InlineKeyboardButton("Back to Token List", callback_data="back_to_tokens")]
         ]
         
@@ -212,9 +199,8 @@ async def show_token_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
         # Create a new update with the original callback query
         return await track_view_command(update, context)
-    
-    # Extract tracking ID from callback_data (format: "history_{id}")
-    tracking_id: str = callback_data.split("_")[-1]
+        
+    token_address = callback_data.split("_")[-1]
     
     user: Optional[User] = update.effective_user
     if not user:
@@ -231,35 +217,31 @@ async def show_token_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("Error: Token information lost. Please try again.")
         return ConversationHandler.END
     
-    token_id: Optional[int] = token_info.get('token_id')
-    if token_id is None:
-        await query.edit_message_text("Error: Token ID is missing. Please try again.")
-        return ConversationHandler.END
-        
     symbol: str = token_info.get('symbol', 'Unknown')
     name: str = token_info.get('name', 'Unknown')
     decimals: int = token_info.get('decimals', 18)
     
-    # Get balance history - converted to async/await pattern
+    # Get balance history
     try:
-        history: List[Dict[str, Any]] = get_token_balance_history(str(user_id), token_id, limit=10)
+        history = await token_manager.get_token_balance_history(str(user_id), token_address)
         
         history_text_value: str
-        if not history or len(history) == 0:
+        if not history:
             history_text_value = "No balance history available yet."
         else:
             history_entries: List[str] = []
             for entry in history:
                 balance: str = entry.get('balance', '0')
                 formatted_balance: str = format_token_balance(int(balance), decimals)
-                timestamp: str = entry.get('timestamp', '').split('.')[0]  # Remove milliseconds
+                timestamp_str = str(entry.get('timestamp', ''))
+                timestamp: str = timestamp_str.split('.')[0]  # Remove milliseconds
                 history_entries.append(f"{timestamp}: {formatted_balance} {symbol}")
             
             history_text_value = "\n".join(history_entries)
         
         # Create keyboard for going back to token info
         keyboard: List[List[InlineKeyboardButton]] = [
-            [InlineKeyboardButton("Back to Token Info", callback_data=f"view_token_{tracking_id}")],
+            [InlineKeyboardButton("Back to Token Info", callback_data=f"view_token_{token_address}")],
             [InlineKeyboardButton("Back to Token List", callback_data="back_to_tokens")]
         ]
         

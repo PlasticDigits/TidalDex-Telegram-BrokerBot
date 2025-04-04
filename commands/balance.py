@@ -1,21 +1,29 @@
+"""
+Command for displaying wallet balances including BNB and tracked tokens.
+"""
 from telegram import Update
 from telegram.ext import ContextTypes
-from typing import Optional, Dict, Any, Union, cast
+from typing import Optional, Dict, Any, Union, cast, List
 from decimal import Decimal
 from services.wallet import get_active_wallet_name, get_user_wallet, get_wallet_balance
 from services.pin import pin_manager
+from services import token_manager
 import logging
 from db.wallet import WalletData
 from web3 import Web3
 import traceback
 import httpx
 from utils.config import BSC_RPC_URL
+from typing import Callable, Coroutine
+from services.pin import require_pin
+from utils.token_utils import format_token_balance
+from telegram.ext import ConversationHandler
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display wallet balance."""
+    """Display wallet balance including BNB and tracked tokens."""
     user = update.effective_user
     if not user:
         logger.error("No effective user found in update")
@@ -40,7 +48,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     wallet_address: str = user_wallet['address']
-    await message.reply_text(f"Fetching balance for {wallet_name}...")
+    await message.reply_text(f"Fetching balances for {wallet_name}...")
 
     httpxClient: httpx.AsyncClient = httpx.AsyncClient()
     
@@ -49,11 +57,31 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         w3: Web3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
         
         # Get BNB balance
-        balance_wei: int = await get_wallet_balance(wallet_address, pin)
+        balance_wei: int = await get_wallet_balance(wallet_address, "BNB")
         balance_bnb: Decimal = Decimal(w3.from_wei(balance_wei, 'ether'))
         
         # Format with comma separators and fixed decimal places
         formatted_balance: str = f"{balance_bnb:,.4f}"
+        
+        # Get token balances
+        try:
+            token_balances = await token_manager.balances(str(user_id))
+            if not token_balances:
+                await message.reply_text("No token balances found.")
+                return
+            
+            # Format the message
+            balance_message = "Your token balances:\n\n"
+            for token_addr, balance_info in token_balances.items():
+                initial_sym = balance_info['symbol']
+                initial_nm = balance_info['name']
+                initial_bal = format_token_balance(balance_info['raw_balance'], balance_info['decimals'])
+                balance_message += f"{initial_sym} ({initial_nm}): {initial_bal}\n"
+            
+            await message.reply_text(balance_message)
+        except Exception as e:
+            logger.error(f"Error getting token balances: {e}")
+            await message.reply_text("An error occurred while getting token balances. Please try again later.")
         
         # Try to get USD price
         try:
@@ -64,36 +92,93 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 usd_value: float = float(balance_bnb) * bnb_price
                 formatted_usd: str = f"${usd_value:,.2f}"
                 
+                # Build message with BNB balance
+                msg_text: List[str] = [
+                    f"🔍 Wallet: {wallet_name}",
+                    f"📬 Address: `{wallet_address}`\n",
+                    f"💰 BNB Balance: {formatted_balance} BNB",
+                    f"💵 BNB Value: {formatted_usd} USD\n"
+                ]
+                
+                # Add token balances if any
+                if token_balances:
+                    msg_text.append("📊 Token Balances:")
+                    for token_addr, balance_info in token_balances.items():
+                        price_sym: str = balance_info['symbol']
+                        price_name: str = balance_info['name']
+                        price_balance: str = format_token_balance(
+                            balance_info['raw_balance'],
+                            balance_info['decimals']
+                        )
+                        msg_text.append(f"• {price_sym} ({price_name}): {price_balance}")
+                
+                msg_text.append("\nUse /send to transfer funds.")
+                
                 await message.reply_text(
-                    f"🔍 Wallet: {wallet_name}\n"
-                    f"📬 Address: `{wallet_address}`\n\n"
-                    f"💰 Balance: {formatted_balance} BNB\n"
-                    f"💵 Value: {formatted_usd} USD\n\n"
-                    f"Use /send to transfer funds.",
+                    "\n".join(msg_text),
                     parse_mode='Markdown'
                 )
             else:
                 # No price data available
+                balance_msg_text: List[str] = [
+                    f"🔍 Wallet: {wallet_name}",
+                    f"📬 Address: `{wallet_address}`\n",
+                    f"💰 BNB Balance: {formatted_balance} BNB\n"
+                ]
+                
+                # Add token balances if any
+                if token_balances:
+                    balance_msg_text.append("📊 Token Balances:")
+                    for token_addr, balance_info in token_balances.items():
+                        no_price_sym: str = balance_info['symbol']
+                        no_price_name: str = balance_info['name']
+                        no_price_balance: str = format_token_balance(
+                            balance_info['raw_balance'],
+                            balance_info['decimals']
+                        )
+                        balance_msg_text.append(f"• {no_price_sym} ({no_price_name}): {no_price_balance}")
+                
+                balance_msg_text.append("\nUse /send to transfer funds.")
+                
                 await message.reply_text(
-                    f"🔍 Wallet: {wallet_name}\n"
-                    f"📬 Address: `{wallet_address}`\n\n"
-                    f"💰 Balance: {formatted_balance} BNB\n\n"
-                    f"Use /send to transfer funds.",
+                    "\n".join(balance_msg_text),
                     parse_mode='Markdown'
                 )
         except Exception as e:
             # Error getting price data
             logger.error(f"Error getting BNB price: {e}")
+            error_msg_text: List[str] = [
+                f"🔍 Wallet: {wallet_name}",
+                f"📬 Address: `{wallet_address}`\n",
+                f"💰 BNB Balance: {formatted_balance} BNB\n"
+            ]
+            
+            # Add token balances if any
+            if token_balances:
+                error_msg_text.append("📊 Token Balances:")
+                for token_addr, balance_info in token_balances.items():
+                    error_sym: str = balance_info['symbol']
+                    error_nm: str = balance_info['name']
+                    error_bal: str = format_token_balance(
+                        balance_info['raw_balance'],
+                        balance_info['decimals']
+                    )
+                    error_msg_text.append(f"• {error_sym} ({error_nm}): {error_bal}")
+            
+            error_msg_text.append("\nUse /send to transfer funds.")
+            
             await message.reply_text(
-                f"🔍 Wallet: {wallet_name}\n"
-                f"📬 Address: `{wallet_address}`\n\n"
-                f"💰 Balance: {formatted_balance} BNB\n\n"
-                f"Use /send to transfer funds.",
+                "\n".join(error_msg_text),
                 parse_mode='Markdown'
             )
     except Exception as e:
         logger.error(f"Error in balance command: {e}")
         logger.error(traceback.format_exc())
         await message.reply_text(
-            "Error retrieving wallet balance. Please try again later."
+            "Error retrieving wallet balances. Please try again later."
         ) 
+
+# Create a PIN-protected version of the command
+pin_protected_balance: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]] = require_pin(
+    "🔒 Viewing your balance requires PIN verification.\nPlease enter your PIN:"
+)(balance_command) 

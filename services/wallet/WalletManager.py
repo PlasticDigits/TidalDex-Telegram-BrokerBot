@@ -627,7 +627,7 @@ class WalletManager:
             int: The balance of the wallet in the smallest unit (wei for BNB, token units for tokens)
         """
         try:
-            if token_address is None:
+            if token_address is None or token_address == 'BNB':
                 # Get native BNB balance
                 # Convert the string to checksummed address format expected by web3
                 checksum_address = self.w3.to_checksum_address(wallet_address)

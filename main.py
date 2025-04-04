@@ -24,7 +24,7 @@ import db
 # Import command handlers from commands package
 from commands.start import start
 from commands.wallet import wallet_command
-from commands.balance import balance_command
+from commands.balance import pin_protected_balance
 from commands.receive import receive_command
 from commands.send import (
     button_callback, 
@@ -60,6 +60,7 @@ from commands.set_pin import (
 from commands.track import track_conv_handler
 from commands.track_stop import track_stop_conv_handler
 from commands.track_view import track_view_conv_handler
+from commands.scan import scan_handler
 # Import delete all wallets command
 from commands.deletewalletsall import deletewalletsall_conv_handler
 
@@ -120,7 +121,6 @@ def main() -> None:
     # Create private chat wrappers for all command handlers
     start_wrapper = create_private_chat_wrapper(start)
     wallet_wrapper = create_private_chat_wrapper(wallet_command)
-    balance_wrapper = create_private_chat_wrapper(balance_command)
     receive_wrapper = create_private_chat_wrapper(receive_command)
     wallets_wrapper = create_private_chat_wrapper(wallets_command)
     set_pin_wrapper = create_private_chat_wrapper(set_pin_command)
@@ -133,7 +133,7 @@ def main() -> None:
     send_wrapper = create_private_chat_wrapper(pin_protected_send)
     backup_wrapper = create_private_chat_wrapper(pin_protected_backup)
     recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
-
+    balance_wrapper = create_private_chat_wrapper(pin_protected_balance)
     # Add command handlers for public commands
     application.add_handler(CommandHandler("start", start_wrapper))
     application.add_handler(CommandHandler("help", universal_help_command))
@@ -231,6 +231,7 @@ def main() -> None:
     application.add_handler(track_conv_handler)
     application.add_handler(track_stop_conv_handler)
     application.add_handler(track_view_conv_handler)
+    application.add_handler(scan_handler)
     
     # Add delete all wallets handler
     application.add_handler(deletewalletsall_conv_handler)
