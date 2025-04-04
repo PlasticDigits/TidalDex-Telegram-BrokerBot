@@ -18,6 +18,7 @@ from db.tokens import (
     get_token_by_address
 )
 from db.track import get_token_balance_history as db_get_token_balance_history
+from services.wallet import wallet_manager
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class TokenManager:
             List[TokenInfo]: List of tracked token information
         """
         try:
-            tokens = await db_get_tracked_tokens(user_id)
+            tokens = db_get_tracked_tokens(user_id)
             return [
                 TokenInfo(
                     token_address=token["token_address"],
@@ -209,13 +210,26 @@ class TokenManager:
         """
         newly_tracked: List[ChecksumAddress] = []
         
+        # Get active wallet for user
+        wallet_name = wallet_manager.get_active_wallet_name(user_id)
+        if not wallet_name:
+            logger.error(f"No active wallet found for user {user_id}")
+            return newly_tracked
+            
+        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name)
+        if not wallet:
+            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            return newly_tracked
+            
+        wallet_address = wallet['address']
+        
         for token_address in self.default_tokens:
             try:
                 if await is_token_tracked(user_id, str(token_address), chain_id):
                     continue
                     
                 contract = self.web3.eth.contract(address=token_address, abi=self.erc20_abi)
-                balance = await contract.functions.balanceOf(user_id).call()
+                balance = await contract.functions.balanceOf(wallet_address).call()
                 
                 if balance > 0:
                     if await self.track(user_id, str(token_address), chain_id):
@@ -236,26 +250,51 @@ class TokenManager:
         Returns:
             Dict[ChecksumAddress, TokenBalance]: Dictionary of token addresses to their balance info
         """
-        tokens = await db_get_tracked_tokens(user_id)
+        # Get active wallet for user
+        wallet_name = wallet_manager.get_active_wallet_name(user_id)
+        if not wallet_name:
+            logger.error(f"No active wallet found for user {user_id}")
+            return {}
+            
+        wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name)
+        if not wallet:
+            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            return {}
+            
+        wallet_address = wallet['address']
+        
+        tokens = db_get_tracked_tokens(user_id)
         balances: Dict[ChecksumAddress, TokenBalance] = {}
         
         for token in tokens:
             try:
+                # Convert token address to checksum address
+                token_address = Web3.to_checksum_address(token["token_address"])
+                
+                # Create contract instance
                 contract = self.web3.eth.contract(
-                    address=cast(Union[ChecksumAddress, ENS], token["token_address"]),
+                    address=token_address,
                     abi=self.erc20_abi
                 )
-                raw_balance = await contract.functions.balanceOf(user_id).call()
+                
+                # Get balance using the contract's balanceOf function
+                raw_balance = await contract.functions.balanceOf(wallet_address).call()
+                
+                # Get token decimals
                 decimals = token.get("decimals", 18)
                 if decimals is None:
                     decimals = 18
+                
+                # Calculate human-readable balance
                 balance = raw_balance / (10 ** decimals)
                 
+                # Skip if required fields are missing
                 if token["symbol"] is None or token["name"] is None:
                     logger.warning(f"Skipping token {token['token_address']} due to missing required fields")
                     continue
-                    
-                balances[Web3.to_checksum_address(token["token_address"])] = TokenBalance(
+                
+                # Add to balances dictionary
+                balances[token_address] = TokenBalance(
                     symbol=token["symbol"],
                     name=token["name"],
                     balance=balance,
@@ -267,7 +306,7 @@ class TokenManager:
                 logger.error(f"Failed to get balance for token {token['token_address']} for user {user_id}: {str(e)}")
                 continue
                 
-        return balances 
+        return balances
 
     async def get_token_balance_history(self, user_id: str, token_address: str, limit: int = 30) -> List[TokenBalanceHistory]:
         """Get the balance history for a specific token.
@@ -282,7 +321,7 @@ class TokenManager:
         """
         try:
             # Get token ID from address
-            token = await get_token_by_address(token_address)
+            token = get_token_by_address(token_address)
             if not token:
                 logger.error(f"Token {token_address} not found in database")
                 return []
@@ -290,7 +329,7 @@ class TokenManager:
             token_id = token['id']
             
             # Get balance history from database
-            history = await cast(Awaitable[List[Dict[str, Any]]], db_get_token_balance_history(user_id, token_id, limit))
+            history = db_get_token_balance_history(user_id, token_id, limit)
             
             if not history:
                 return []
@@ -321,7 +360,7 @@ class TokenManager:
         """
         try:
             token_address = Web3.to_checksum_address(token_address)
-            return await is_token_tracked(user_id, token_address, chain_id)
+            return is_token_tracked(user_id, token_address, chain_id)
         except Exception as e:
             logger.error(f"Failed to check if token {token_address} is tracked for user {user_id}: {str(e)}")
             return False
@@ -340,7 +379,7 @@ class TokenManager:
             token_address = Web3.to_checksum_address(token_address)
             
             # First try to get token info from database
-            token = await get_token_by_address(token_address)
+            token = get_token_by_address(token_address)
             if token:
                 return TokenInfo(
                     token_address=token_address,

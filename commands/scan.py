@@ -4,12 +4,13 @@ Command for scanning and automatically tracking tokens with non-zero balances.
 import logging
 from telegram import Update, User, Message
 from telegram.ext import ContextTypes, CommandHandler
-from typing import Optional, List, Dict, Any, Union, Callable, cast, Sequence
+from typing import Optional, List, Dict, Any, Union, Callable, cast, Sequence, Coroutine
 from web3 import Web3
 from web3.types import ChecksumAddress # type: ignore[attr-defined]
 
 from services import token_manager
 from services.wallet import get_active_wallet_name, get_wallet_by_name
+from services.pin import require_pin, pin_manager
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -25,6 +26,16 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
     user_id: int = user.id
     
+    # Get PIN from PIN manager
+    pin: Optional[str] = pin_manager.get_pin(user_id)
+    if not pin:
+        message: Optional[Message] = update.message
+        if message:
+            await message.reply_text(
+                "Error: PIN verification failed. Please try again."
+            )
+        return
+    
     # Verify the user has a wallet
     wallet_name: Optional[str] = get_active_wallet_name(str(user_id))
     if not wallet_name:
@@ -35,8 +46,8 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
         return
     
-    # Get wallet address
-    wallet = get_wallet_by_name(str(user_id), wallet_name, None)
+    # Get wallet address with PIN
+    wallet = get_wallet_by_name(str(user_id), wallet_name, pin)
     if not wallet:
         message2: Optional[Message] = update.message
         if message2:
@@ -98,5 +109,10 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "Error scanning for tokens. Please try again later."
             )
 
+# Create PIN-protected version of the command
+pin_protected_scan: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]] = require_pin(
+    "🔒 Scanning for tokens requires PIN verification.\nPlease enter your PIN:"
+)(scan_command)
+
 # Setup command handler
-scan_handler = CommandHandler("scan", scan_command) 
+scan_handler = CommandHandler("scan", pin_protected_scan) 

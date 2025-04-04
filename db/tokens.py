@@ -19,7 +19,7 @@ class TokenInfo(TypedDict):
     chain_id: Optional[int]
 
 @retry_decorator(5, 0.1)
-async def track_token(user_id: str, token_address: str, chain_id: int = 56, 
+def track_token(user_id: str, token_address: str, chain_id: int = 56, 
                      symbol: Optional[str] = None, name: Optional[str] = None, 
                      decimals: Optional[int] = None) -> None:
     """Add a new token to the tracked tokens for a specific user."""
@@ -28,11 +28,11 @@ async def track_token(user_id: str, token_address: str, chain_id: int = 56,
     INSERT OR IGNORE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
     VALUES (?, ?, ?, ?, ?)
     """
-    await cast(Awaitable[None], execute_query(token_query, (token_address, symbol, name, decimals, chain_id)))
+    execute_query(token_query, (token_address, symbol, name, decimals, chain_id))
     
     # Then, get the token_id
     get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
-    token_result = await cast(Awaitable[List[Dict[str, Any]]], execute_query(get_token_id_query, (token_address, chain_id)))
+    token_result = execute_query(get_token_id_query, (token_address, chain_id))
     if not token_result:
         raise ValueError(f"Failed to get token_id for {token_address}")
     token_id = token_result[0]['id']
@@ -42,24 +42,24 @@ async def track_token(user_id: str, token_address: str, chain_id: int = 56,
     INSERT OR IGNORE INTO user_tracked_tokens (user_id, token_id)
     VALUES (?, ?)
     """
-    await cast(Awaitable[None], execute_query(track_query, (user_id, token_id)))
+    execute_query(track_query, (user_id, token_id))
 
 @retry_decorator(5, 0.1)
-async def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
+def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
     """Remove a token from the tracked tokens for a specific user."""
     # Get the token_id
     get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
-    token_result = await cast(Awaitable[List[Dict[str, Any]]], execute_query(get_token_id_query, (token_address, chain_id)))
+    token_result = execute_query(get_token_id_query, (token_address, chain_id))
     if not token_result:
         return  # Token not found, nothing to untrack
     token_id = token_result[0]['id']
     
     # Remove from user_tracked_tokens
     untrack_query = "DELETE FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?"
-    await cast(Awaitable[None], execute_query(untrack_query, (user_id, token_id)))
+    execute_query(untrack_query, (user_id, token_id))
 
 @retry_decorator(5, 0.1)
-async def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
+def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
     """Get all tracked tokens for a specific user."""
     query = """
     SELECT t.token_address, t.token_symbol as symbol, t.token_name as name, 
@@ -68,7 +68,9 @@ async def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
     JOIN user_tracked_tokens utt ON t.id = utt.token_id
     WHERE utt.user_id = ?
     """
-    result = await cast(Awaitable[List[Dict[str, Any]]], execute_query(query, (user_id,)))
+    result = execute_query(query, (user_id,), fetch='all')
+    if not result:
+        return []
     return [TokenInfo(
         token_address=row['token_address'],
         symbol=row['symbol'],
@@ -78,7 +80,7 @@ async def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
     ) for row in result]
 
 @retry_decorator(5, 0.1)
-async def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bool:
+def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bool:
     """Check if a token is already being tracked for a specific user."""
     query = """
     SELECT 1 
@@ -86,11 +88,11 @@ async def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56)
     JOIN tokens t ON t.id = utt.token_id
     WHERE utt.user_id = ? AND t.token_address = ? AND t.chain_id = ?
     """
-    result = await cast(Awaitable[List[Dict[str, Any]]], execute_query(query, (user_id, token_address, chain_id)))
+    result = execute_query(query, (user_id, token_address, chain_id))
     return len(result) > 0 
 
 @retry_decorator(5, 0.1)
-async def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dict[str, Any]]:
+def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dict[str, Any]]:
     """Get token information by its address.
     
     Args:
@@ -106,7 +108,7 @@ async def get_token_by_address(token_address: str, chain_id: int = 56) -> Option
         FROM tokens
         WHERE token_address = ? AND chain_id = ?
         """
-        result = await cast(Awaitable[Optional[Dict[str, Any]]], execute_query(query, (token_address, chain_id), fetch='one'))
+        result = execute_query(query, (token_address, chain_id), fetch='one')
         
         if not result:
             return None

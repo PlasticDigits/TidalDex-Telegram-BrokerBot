@@ -51,6 +51,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await message.reply_text(f"Fetching balances for {wallet_name}...")
 
     httpxClient: httpx.AsyncClient = httpx.AsyncClient()
+    token_balances: Dict[str, Any] = {}  # Initialize token_balances as empty dict
     
     try:
         # Connect to BSC
@@ -65,23 +66,10 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         # Get token balances
         try:
-            token_balances = await token_manager.balances(str(user_id))
-            if not token_balances:
-                await message.reply_text("No token balances found.")
-                return
-            
-            # Format the message
-            balance_message = "Your token balances:\n\n"
-            for token_addr, balance_info in token_balances.items():
-                initial_sym = balance_info['symbol']
-                initial_nm = balance_info['name']
-                initial_bal = format_token_balance(balance_info['raw_balance'], balance_info['decimals'])
-                balance_message += f"{initial_sym} ({initial_nm}): {initial_bal}\n"
-            
-            await message.reply_text(balance_message)
+            token_balances = await token_manager.balances(user_id_str)
         except Exception as e:
             logger.error(f"Error getting token balances: {e}")
-            await message.reply_text("An error occurred while getting token balances. Please try again later.")
+            token_balances = {}
         
         # Try to get USD price
         try:
@@ -113,6 +101,8 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         msg_text.append(f"• {price_sym} ({price_name}): {price_balance}")
                 
                 msg_text.append("\nUse /send to transfer funds.")
+                msg_text.append("\nUse /scan to search for tokens.")
+                msg_text.append("\nUse /track to add balance display for a token.")
                 
                 await message.reply_text(
                     "\n".join(msg_text),
