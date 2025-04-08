@@ -23,22 +23,26 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
                      symbol: Optional[str] = None, name: Optional[str] = None, 
                      decimals: Optional[int] = None) -> None:
     """Add a new token to the tracked tokens for a specific user."""
+    logger.info(f"tracking token {symbol} ({token_address}) for user {hash_user_id(user_id)}")
     # First, hash the user_id
     user_id = hash_user_id(user_id)
+    
     # First, ensure the token exists in the tokens table
     token_query = """
-    INSERT OR IGNORE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
+    INSERT OR REPLACE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
     VALUES (?, ?, ?, ?, ?)
     """
     execute_query(token_query, (token_address, symbol, name, decimals, chain_id))
-    
+
     # Then, get the token_id
     get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
-    token_result = execute_query(get_token_id_query, (token_address, chain_id))
+    token_result = execute_query(get_token_id_query, (token_address, chain_id), fetch='one')
+    
     if not token_result:
         raise ValueError(f"Failed to get token_id for {token_address}")
-    token_id = token_result[0]['id']
-    
+        
+    token_id = token_result['id']
+
     # Finally, add to user_tracked_tokens
     track_query = """
     INSERT OR IGNORE INTO user_tracked_tokens (user_id, token_id)

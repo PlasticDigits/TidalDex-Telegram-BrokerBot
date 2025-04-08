@@ -5,7 +5,8 @@ import logging
 import os
 import json
 import httpx
-from typing import Dict, List, Optional, Any, TypedDict, cast, Union, Awaitable
+import asyncio
+from typing import Dict, List, Optional, Any, TypedDict, cast, Union, Awaitable, Callable
 from web3 import Web3
 from web3.contract import Contract
 from web3.exceptions import ContractLogicError
@@ -177,13 +178,14 @@ class TokenManager:
                 logger.info(f"Token {token_address} is already being tracked for user {hash_user_id(user_id)}")
                 return True
 
-            # Check if token is in DEFAULT_TOKEN_LIST
+            logger.info(f"checking if token is in DEFAULT_TOKEN_LIST")
             if token_address in self.default_tokens:
                 token_details = self.default_tokens[token_address]
                 symbol = token_details["symbol"]
                 name = token_details["name"]
                 decimals = token_details["decimals"]
             else:
+                logger.info(f"Token {token_address} is not in DEFAULT_TOKEN_LIST")
                 # Get token details from contract if not in DEFAULT_TOKEN_LIST
                 token_info = await get_token_info(token_address)
                 if token_info:
@@ -194,7 +196,7 @@ class TokenManager:
                     logger.error(f"Failed to get token info for {token_address}")
                     return False
             
-            await track_token(user_id, token_address, chain_id, symbol, name, decimals)
+            track_token(user_id, token_address, chain_id, symbol, name, decimals)
             logger.info(f"Successfully started tracking token {symbol} ({token_address}) for user {hash_user_id(user_id)}")
             return True
             
@@ -222,12 +224,13 @@ class TokenManager:
             logger.error(f"Failed to untrack token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return False
 
-    async def scan(self, user_id: str, chain_id: int = 56) -> List[ChecksumAddress]:
+    async def scan(self, user_id: str, chain_id: int = 56, status_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> List[ChecksumAddress]:
         """Scan default token list and track tokens with non-zero balance for a specific user.
         
         Args:
             user_id: ID of the user to scan tokens for
             chain_id: Chain ID to scan tokens on (default: 56 for BSC)
+            status_callback: Optional async callback function to report scanning progress
             
         Returns:
             List[ChecksumAddress]: List of token addresses that were newly tracked
@@ -262,13 +265,41 @@ class TokenManager:
                 if isTokenTracked:
                     continue
                     
-                balance = await get_token_balance(wallet_address, token_address)
+                # Get token details for status updates
+                token_info = await self.get_token_info(str(token_address))
+                if not token_info:
+                    logger.warning(f"Could not get token info for {token_address}")
+                    continue
+                    
+                # Run balance check and status update concurrently
+                if status_callback:
+                    balance, _ = await asyncio.gather(
+                        get_token_balance(wallet_address, token_address),
+                        status_callback(f"Scanning {token_info['symbol']}...")
+                    )
+                else:
+                    balance = await get_token_balance(wallet_address, token_address)
+                
+                # Calculate human-readable balance
+                decimals = token_info['decimals']
+                human_balance = balance / (10 ** decimals)
                 
                 if balance > 0:
-                    if await self.track(user_id, str(token_address), chain_id):
-                        newly_tracked.append(token_address)
+                    if status_callback:
+                        # Run tracking and status update concurrently
+                        tracking_success, _ = await asyncio.gather(
+                            self.track(user_id, str(token_address), chain_id),
+                            status_callback(f"{token_info['symbol']} Balance: {human_balance}\nTracking...")
+                        )
+                        if tracking_success:
+                            newly_tracked.append(token_address)
+                        else:
+                            logger.error(f"Failed to track token {token_address} for user {hash_user_id(user_id)}")
                     else:
-                        logger.error(f"Failed to track token {token_address} for user {hash_user_id(user_id)}")
+                        if await self.track(user_id, str(token_address), chain_id):
+                            newly_tracked.append(token_address)
+                        else:
+                            logger.error(f"Failed to track token {token_address} for user {hash_user_id(user_id)}")
                         
             except Exception as e:
                 logger.error(f"Failed to scan token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
@@ -311,12 +342,6 @@ class TokenManager:
             try:
                 # Convert token address to checksum address
                 token_address = Web3.to_checksum_address(token["token_address"])
-                
-                # Create contract instance
-                contract = self.web3.eth.contract(
-                    address=token_address,
-                    abi=self.erc20_abi
-                )
                 
                 # Get balance using the contract's balanceOf function
                 raw_balance = await get_token_balance(wallet_address, token_address)
@@ -434,9 +459,18 @@ class TokenManager:
             contract = self.web3.eth.contract(address=token_address, abi=self.erc20_abi)
             
             try:
-                symbol = await contract.functions.symbol().call()
-                name = await contract.functions.name().call()
-                decimals = await contract.functions.decimals().call()
+                # Get token info concurrently
+                symbol, name, decimals = await asyncio.gather(
+                    asyncio.to_thread(contract.functions.symbol().call),
+                    asyncio.to_thread(contract.functions.name().call),
+                    asyncio.to_thread(contract.functions.decimals().call)
+                )
+                
+                # Some tokens return bytes for symbol/name, so we need to decode
+                if isinstance(symbol, bytes):
+                    symbol = symbol.decode('utf-8', errors='ignore').strip('\x00')
+                if isinstance(name, bytes):
+                    name = name.decode('utf-8', errors='ignore').strip('\x00')
                 
                 return TokenInfo(
                     token_address=token_address,
@@ -446,9 +480,9 @@ class TokenManager:
                     chain_id=chain_id
                 )
             except Exception as e:
-                logger.error(f"Failed to get token info from blockchain for {token_address}: {str(e)}")
+                logger.error(f"Failed to get token info from blockchain for {token_address}: {e}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Failed to get token info for {token_address}: {str(e)}")
+            logger.error(f"Failed to get token info for {token_address}: {e}")
             return None 

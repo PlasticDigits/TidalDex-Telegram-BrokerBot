@@ -51,7 +51,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         "Token Tracking:\n"
         "/track - Track a token's balance over time\n"
-        "/track_view - View your tracked token balances and history\n"
+        "/balance - View your tracked token balances\n"
         "/track_stop - Stop tracking a token\n\n"
         
         "Other:\n"
@@ -104,7 +104,7 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         
         "Token Tracking:\n"
         "/track - Track a token's balance over time\n"
-        "/track_view - View your tracked token balances and history\n"
+        "/balance - View your tracked token balances\n"
         "/track_stop - Stop tracking a token\n\n"
         
         "Other:\n"

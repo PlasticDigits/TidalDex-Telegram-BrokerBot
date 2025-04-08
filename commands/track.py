@@ -92,7 +92,7 @@ async def process_token_address(update: Update, context: ContextTypes.DEFAULT_TY
     if is_tracked:
         await message.reply_text(
             f"You are already tracking {symbol} ({name}).\n"
-            "Use /track_view to see your tracked tokens."
+            "Use /balance to see your tracked token balances."
         )
         return ConversationHandler.END
     
@@ -168,7 +168,7 @@ async def process_tracking_confirmation(update: Update, context: ContextTypes.DE
         
         await query.edit_message_text(
             f"Successfully started tracking {symbol} ({name}).\n"
-            f"Use /track_view to see your token balances."
+            f"Use /balance to see your token balances."
         )
         
         return ConversationHandler.END

@@ -47,23 +47,36 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Send initial message
     message4: Optional[Message] = update.message
-    if message4:
-        await message4.reply_text(
-            "Scanning for tokens with non-zero balances...\n"
-            "This may take a few moments."
-        )
+    if not message4:
+        return
+        
+    status_message = await message4.reply_text(
+        "Scanning for tokens with non-zero balances...\n"
+        "This may take a few moments."
+    )
     
     try:
-        # Scan for tokens
-        newly_tracked: Sequence[ChecksumAddress] = await token_manager.scan(user_id_str)
+        # Define status callback to update the message
+        async def status_callback(status: str) -> None:
+            try:
+                await status_message.edit_text(
+                    f"Scanning for tokens with non-zero balances...\n\n"
+                    f"Current status: {status}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to update status message: {e}")
+        
+        # Scan for tokens with status updates
+        newly_tracked: Sequence[ChecksumAddress] = await token_manager.scan(
+            user_id_str,
+            status_callback=status_callback
+        )
         
         if not newly_tracked:
-            message5: Optional[Message] = update.message
-            if message5:
-                await message5.reply_text(
-                    "No new tokens found with non-zero balances.\n"
-                    "Use /track to manually add tokens you want to track."
-                )
+            await status_message.edit_text(
+                "No new tokens found with non-zero balances.\n"
+                "Use /track to manually add tokens you want to track."
+            )
             return
         
         # Format the list of newly tracked tokens
@@ -71,23 +84,19 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"• {token}" for token in newly_tracked
         ])
         
-        message6: Optional[Message] = update.message
-        if message6:
-            await message6.reply_text(
-                f"Successfully started tracking {len(newly_tracked)} new tokens:\n\n"
-                f"{token_list}\n\n"
-                "Use /track_view to see your token balances."
-            )
+        await status_message.edit_text(
+            f"Successfully started tracking {len(newly_tracked)} new tokens:\n\n"
+            f"{token_list}\n\n"
+            "Use /balance to see your token balances."
+        )
             
         logger.info(f"User {hash_user_id(user_id_int)} scanned and started tracking {len(newly_tracked)} new tokens")
         
     except Exception as e:
         logger.error(f"Error scanning tokens for user {hash_user_id(user_id_int)}: {e}")
-        message7: Optional[Message] = update.message
-        if message7:
-            await message7.reply_text(
-                "Error scanning for tokens. Please try again later."
-            )
+        await status_message.edit_text(
+            "Error scanning for tokens. Please try again later."
+        )
 
 # Create PIN-protected version of the command
 pin_protected_scan: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]] = require_pin(

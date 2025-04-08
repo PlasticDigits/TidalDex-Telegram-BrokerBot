@@ -59,7 +59,6 @@ from commands.set_pin import (
 # Import track-related commands
 from commands.track import track_conv_handler
 from commands.track_stop import track_stop_conv_handler
-from commands.track_view import track_view_conv_handler
 from commands.scan import pin_protected_scan
 # Import delete all wallets command
 from commands.deletewalletsall import deletewalletsall_conv_handler
@@ -232,7 +231,6 @@ def main() -> None:
     # Add token tracking handlers
     application.add_handler(track_conv_handler)
     application.add_handler(track_stop_conv_handler)
-    application.add_handler(track_view_conv_handler)
     application.add_handler(CommandHandler("scan", scan_wrapper))
     
     # Add delete all wallets handler
