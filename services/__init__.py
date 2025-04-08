@@ -5,4 +5,4 @@ from utils.web3_connection import w3
 from services.tokens import TokenManager
 
 # Initialize shared service instances
-token_manager = TokenManager(w3) 
+token_manager = TokenManager() 

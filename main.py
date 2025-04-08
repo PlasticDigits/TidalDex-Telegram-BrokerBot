@@ -62,6 +62,13 @@ from commands.track_stop import track_stop_conv_handler
 from commands.scan import pin_protected_scan
 # Import delete all wallets command
 from commands.deletewalletsall import deletewalletsall_conv_handler
+# Import swap-related commands
+from commands.swap import (
+    swap_command, choose_from_token, choose_to_token, handle_custom_token_address,
+    enter_amount, enter_slippage, confirm_swap,
+    CHOOSING_FROM_TOKEN, CHOOSING_TO_TOKEN, ENTERING_AMOUNT, ENTERING_SLIPPAGE, CONFIRMING_SWAP,
+    pin_protected_swap
+)
 
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -134,6 +141,7 @@ def main() -> None:
     recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
     balance_wrapper = create_private_chat_wrapper(pin_protected_balance)
     scan_wrapper = create_private_chat_wrapper(pin_protected_scan)
+    swap_wrapper = create_private_chat_wrapper(pin_protected_swap)
 
     # Add command handlers for public commands
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -221,12 +229,37 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
+    # Add conversation handler for swapping tokens
+    swap_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("swap", swap_wrapper)],
+        states={
+            CHOOSING_FROM_TOKEN: [
+                CallbackQueryHandler(choose_from_token, pattern=r'^(swap_from_.*|swap_cancel)$')
+            ],
+            CHOOSING_TO_TOKEN: [
+                CallbackQueryHandler(choose_to_token, pattern=r'^(swap_to_.*|swap_cancel)$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_token_address)
+            ],
+            ENTERING_AMOUNT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_amount)
+            ],
+            ENTERING_SLIPPAGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, enter_slippage)
+            ],
+            CONFIRMING_SWAP: [
+                CallbackQueryHandler(confirm_swap, pattern=r'^(swap_confirm|swap_cancel)$')
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    
     application.add_handler(send_conv_handler)
     application.add_handler(recover_conv_handler)
     application.add_handler(wallets_conv_handler)
     application.add_handler(addwallet_conv_handler)
     application.add_handler(rename_wallet_conv_handler)
     application.add_handler(set_pin_conv_handler)
+    application.add_handler(swap_conv_handler)
     
     # Add token tracking handlers
     application.add_handler(track_conv_handler)

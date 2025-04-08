@@ -23,6 +23,7 @@ from services.wallet import wallet_manager
 from services.pin import pin_manager
 from db.utils import hash_user_id
 from utils.token_utils import get_token_balance, get_token_info 
+from utils.web3_connection import w3
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,11 @@ class TokenInfo(TypedDict):
 class TokenManager:
     """Service for managing ERC20 token tracking and balance monitoring."""
     
-    def __init__(self, web3: Web3) -> None:
+    def __init__(self) -> None:
         """Initialize the TokenManager.
-        
-        Args:
-            web3: Web3 instance for blockchain interaction
         """
-        self.web3 = web3
+            
+        self.web3 = w3
         self.default_tokens: Dict[ChecksumAddress, TokenDetails] = {}
         
         # Load ERC20 ABI from file
@@ -412,6 +411,23 @@ class TokenManager:
         except Exception as e:
             logger.error(f"Failed to get balance history for token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return []
+        
+    def get_token_balance(self, wallet_address: str, token_address: str) -> int:
+        """Get the balance of a specific token for a wallet.
+        
+        Args:
+            wallet_address: Address of the wallet to get balance for
+            token_address: Address of the token to get balance for
+            
+        Returns:
+            int: Raw Balance of the token for the wallet
+        """
+        try:
+            token_address = Web3.to_checksum_address(token_address)
+            return get_token_balance(wallet_address, token_address)
+        except Exception as e:
+            logger.error(f"Failed to get token balance for {token_address} for wallet {wallet_address}: {str(e)}")
+            return 0
 
     def is_token_tracked(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
         """Check if a user is tracking a specific token.

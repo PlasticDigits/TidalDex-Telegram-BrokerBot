@@ -82,6 +82,7 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         from commands.send import send_command
         from commands.balance import balance_command
         from commands.scan import scan_command
+        from commands.swap import swap_command
         
         # Map of command names to handlers
         command_handlers: Dict[str, Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[Any]]] = {
@@ -91,7 +92,8 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             'send_command': send_command,
             'addwallet_command': addwallet_command,
             'balance_command': balance_command,
-            'scan_command': scan_command
+            'scan_command': scan_command,
+            'swap_command': swap_command
             # Add more command handlers as needed
         }
         
