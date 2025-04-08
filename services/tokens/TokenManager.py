@@ -20,6 +20,8 @@ from db.tokens import (
 from db.track import get_token_balance_history as db_get_token_balance_history
 from services.wallet import wallet_manager
 from services.pin import pin_manager
+from db.utils import hash_user_id
+from utils.token_utils import get_token_balance, get_token_info 
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,7 @@ class TokenManager:
             user_id_int = int(user_id)
             return pin_manager.get_pin(user_id_int)
         except (ValueError, TypeError) as e:
-            logger.error(f"Failed to get PIN for user {user_id}: {str(e)}")
+            logger.error(f"Failed to get PIN for user {hash_user_id(user_id)}: {str(e)}")
             return None
 
     async def get_tracked_tokens(self, user_id: str, chain_id: int = 56) -> List[TokenInfo]:
@@ -111,7 +113,7 @@ class TokenManager:
                 for token in tokens
             ]
         except Exception as e:
-            logger.error(f"Failed to get tracked tokens for user {user_id}: {str(e)}")
+            logger.error(f"Failed to get tracked tokens for user {hash_user_id(user_id)}: {str(e)}")
             return []
 
     async def _parse_default_token_list(self) -> Dict[ChecksumAddress, TokenDetails]:
@@ -123,6 +125,7 @@ class TokenManager:
         Returns:
             Dict[ChecksumAddress, TokenDetails]: Dictionary mapping token addresses to their details
         """
+        logger.info("Parsing default token list")
         default_tokens: Dict[ChecksumAddress, TokenDetails] = {}
         token_list_url = os.getenv("DEFAULT_TOKEN_LIST", "")
         
@@ -135,7 +138,6 @@ class TokenManager:
                 response = await client.get(token_list_url)
                 response.raise_for_status()
                 token_list = response.json()
-                
             if not isinstance(token_list, dict) or 'tokens' not in token_list:
                 logger.error("Invalid token list format: missing 'tokens' array")
                 return default_tokens
@@ -155,7 +157,7 @@ class TokenManager:
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             logger.error(f"Failed to fetch or parse token list from {token_list_url}: {str(e)}")
             
-        return default_tokens
+        self.default_tokens = default_tokens
 
     async def track(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
         """Track a new ERC20 token for a specific user.
@@ -171,8 +173,8 @@ class TokenManager:
         try:
             token_address = Web3.to_checksum_address(token_address)
             
-            if await is_token_tracked(user_id, token_address, chain_id):
-                logger.info(f"Token {token_address} is already being tracked for user {user_id}")
+            if is_token_tracked(user_id, token_address, chain_id):
+                logger.info(f"Token {token_address} is already being tracked for user {hash_user_id(user_id)}")
                 return True
 
             # Check if token is in DEFAULT_TOKEN_LIST
@@ -183,17 +185,21 @@ class TokenManager:
                 decimals = token_details["decimals"]
             else:
                 # Get token details from contract if not in DEFAULT_TOKEN_LIST
-                contract = self.web3.eth.contract(address=token_address, abi=self.erc20_abi)
-                symbol = await contract.functions.symbol().call()
-                name = await contract.functions.name().call()
-                decimals = await contract.functions.decimals().call()
+                token_info = await get_token_info(token_address)
+                if token_info:
+                    symbol = token_info["symbol"]
+                    name = token_info["name"]
+                    decimals = token_info["decimals"]
+                else:
+                    logger.error(f"Failed to get token info for {token_address}")
+                    return False
             
             await track_token(user_id, token_address, chain_id, symbol, name, decimals)
-            logger.info(f"Successfully started tracking token {symbol} ({token_address}) for user {user_id}")
+            logger.info(f"Successfully started tracking token {symbol} ({token_address}) for user {hash_user_id(user_id)}")
             return True
             
         except (ContractLogicError, ValueError) as e:
-            logger.error(f"Failed to track token {token_address} for user {user_id}: {str(e)}")
+            logger.error(f"Failed to track token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return False
 
     async def untrack(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
@@ -210,10 +216,10 @@ class TokenManager:
         try:
             token_address = Web3.to_checksum_address(token_address)
             await untrack_token(user_id, token_address, chain_id)
-            logger.info(f"Stopped tracking token {token_address} for user {user_id}")
+            logger.info(f"Stopped tracking token {token_address} for user {hash_user_id(user_id)}")
             return True
         except Exception as e:
-            logger.error(f"Failed to untrack token {token_address} for user {user_id}: {str(e)}")
+            logger.error(f"Failed to untrack token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return False
 
     async def scan(self, user_id: str, chain_id: int = 56) -> List[ChecksumAddress]:
@@ -231,36 +237,41 @@ class TokenManager:
         # Get active wallet for user
         wallet_name = wallet_manager.get_active_wallet_name(user_id)
         if not wallet_name:
-            logger.error(f"No active wallet found for user {user_id}")
+            logger.error(f"No active wallet found for user {hash_user_id(user_id)}")
             return newly_tracked
             
         # Get user's PIN
         pin = self._get_user_pin(user_id)
         if not pin and pin_manager.needs_pin(int(user_id)):
-            logger.error(f"PIN required but not available for user {user_id}")
+            logger.error(f"PIN required but not available for user {hash_user_id(user_id)}")
             return newly_tracked
             
         wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet:
-            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            logger.error(f"Wallet {wallet_name} not found for user {hash_user_id(user_id)}")
             return newly_tracked
             
         wallet_address = wallet['address']
+
+        # update the default token list
+        await self._parse_default_token_list()
         
         for token_address in self.default_tokens:
+            isTokenTracked: bool = is_token_tracked(user_id, str(token_address), chain_id)
             try:
-                if await is_token_tracked(user_id, str(token_address), chain_id):
+                if isTokenTracked:
                     continue
                     
-                contract = self.web3.eth.contract(address=token_address, abi=self.erc20_abi)
-                balance = await contract.functions.balanceOf(wallet_address).call()
+                balance = await get_token_balance(wallet_address, token_address)
                 
                 if balance > 0:
                     if await self.track(user_id, str(token_address), chain_id):
                         newly_tracked.append(token_address)
+                    else:
+                        logger.error(f"Failed to track token {token_address} for user {hash_user_id(user_id)}")
                         
             except Exception as e:
-                logger.error(f"Failed to scan token {token_address} for user {user_id}: {str(e)}")
+                logger.error(f"Failed to scan token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
                 continue
                 
         return newly_tracked
@@ -277,18 +288,18 @@ class TokenManager:
         # Get active wallet for user
         wallet_name = wallet_manager.get_active_wallet_name(user_id)
         if not wallet_name:
-            logger.error(f"No active wallet found for user {user_id}")
+            logger.error(f"No active wallet found for user {hash_user_id(user_id)}")
             return {}
             
         # Get user's PIN
         pin = self._get_user_pin(user_id)
         if not pin and pin_manager.needs_pin(int(user_id)):
-            logger.error(f"PIN required but not available for user {user_id}")
+            logger.error(f"PIN required but not available for user {hash_user_id(user_id)}")
             return {}
             
         wallet = wallet_manager.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet:
-            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            logger.error(f"Wallet {wallet_name} not found for user {hash_user_id(user_id)}")
             return {}
             
         wallet_address = wallet['address']
@@ -308,7 +319,7 @@ class TokenManager:
                 )
                 
                 # Get balance using the contract's balanceOf function
-                raw_balance = await contract.functions.balanceOf(wallet_address).call()
+                raw_balance = await get_token_balance(wallet_address, token_address)
                 
                 # Get token decimals
                 decimals = token.get("decimals", 18)
@@ -333,7 +344,7 @@ class TokenManager:
                 )
                 
             except Exception as e:
-                logger.error(f"Failed to get balance for token {token['token_address']} for user {user_id}: {str(e)}")
+                logger.error(f"Failed to get balance for token {token['token_address']} for user {hash_user_id(user_id)}: {str(e)}")
                 continue
                 
         return balances
@@ -374,10 +385,10 @@ class TokenManager:
             ]
             
         except Exception as e:
-            logger.error(f"Failed to get balance history for token {token_address} for user {user_id}: {str(e)}")
+            logger.error(f"Failed to get balance history for token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return []
 
-    async def is_token_tracked(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
+    def is_token_tracked(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
         """Check if a user is tracking a specific token.
         
         Args:
@@ -392,7 +403,7 @@ class TokenManager:
             token_address = Web3.to_checksum_address(token_address)
             return is_token_tracked(user_id, token_address, chain_id)
         except Exception as e:
-            logger.error(f"Failed to check if token {token_address} is tracked for user {user_id}: {str(e)}")
+            logger.error(f"Failed to check if token {token_address} is tracked for user {hash_user_id(user_id)}: {str(e)}")
             return False
 
     async def get_token_info(self, token_address: str, chain_id: int = 56) -> Optional[TokenInfo]:

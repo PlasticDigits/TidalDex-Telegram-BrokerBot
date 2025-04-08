@@ -12,7 +12,7 @@ from services import token_manager
 from services.wallet import wallet_manager
 from services.pin import require_pin, pin_manager
 from db.wallet import WalletData
-
+from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -79,10 +79,10 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "Use /track_view to see your token balances."
             )
             
-        logger.info(f"User {user_id} scanned and started tracking {len(newly_tracked)} new tokens")
+        logger.info(f"User {hash_user_id(user_id_int)} scanned and started tracking {len(newly_tracked)} new tokens")
         
     except Exception as e:
-        logger.error(f"Error scanning tokens for user {user_id}: {e}")
+        logger.error(f"Error scanning tokens for user {hash_user_id(user_id_int)}: {e}")
         message7: Optional[Message] = update.message
         if message7:
             await message7.reply_text(

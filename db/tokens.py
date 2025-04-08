@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Any, Optional, TypedDict, Awaitable, cast
 from web3 import Web3
 from db.connection import execute_query, retry_decorator
-
+from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,8 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
                      symbol: Optional[str] = None, name: Optional[str] = None, 
                      decimals: Optional[int] = None) -> None:
     """Add a new token to the tracked tokens for a specific user."""
+    # First, hash the user_id
+    user_id = hash_user_id(user_id)
     # First, ensure the token exists in the tokens table
     token_query = """
     INSERT OR IGNORE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
@@ -47,6 +49,8 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
 @retry_decorator(5, 0.1)
 def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
     """Remove a token from the tracked tokens for a specific user."""
+    # First, hash the user_id
+    user_id = hash_user_id(user_id)
     # Get the token_id
     get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
     token_result = execute_query(get_token_id_query, (token_address, chain_id))
@@ -61,6 +65,8 @@ def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
 @retry_decorator(5, 0.1)
 def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
     """Get all tracked tokens for a specific user."""
+    # First, hash the user_id
+    user_id = hash_user_id(user_id)
     query = """
     SELECT t.token_address, t.token_symbol as symbol, t.token_name as name, 
            t.token_decimals as decimals, t.chain_id
@@ -82,6 +88,8 @@ def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
 @retry_decorator(5, 0.1)
 def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bool:
     """Check if a token is already being tracked for a specific user."""
+    # First, hash the user_id
+    user_id = hash_user_id(user_id)
     query = """
     SELECT 1 
     FROM user_tracked_tokens utt
@@ -89,7 +97,10 @@ def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bo
     WHERE utt.user_id = ? AND t.token_address = ? AND t.chain_id = ?
     """
     result = execute_query(query, (user_id, token_address, chain_id))
-    return len(result) > 0 
+    if result == -1:
+        return False
+    else:
+        return True
 
 @retry_decorator(5, 0.1)
 def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dict[str, Any]]:
