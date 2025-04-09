@@ -1,6 +1,6 @@
 from typing import Dict, Optional, Any, List, Callable, Awaitable
 from web3 import Web3
-from web3.types import ChecksumAddress
+from web3.types import ChecksumAddress, Wei
 import logging
 from decimal import Decimal
 import json
@@ -11,9 +11,10 @@ from utils.gas_estimation import (
     estimate_contract_call_gas
 )
 from utils.load_abi import load_abi
-from utils.config import get_env_var, BSC_SCANNER_URL, INTERMEDIATE_LP_ADDRESS
+from utils.config import get_env_var, BSC_SCANNER_URL, INTERMEDIATE_LP_ADDRESS, CL8Y_BUY_AND_BURN, CL8Y_BB_FEE_BPS, WETH
 from utils.status_updates import StatusCallback
 from utils.web3_connection import w3  # Import the shared Web3 connection
+from wallet.send import send_contract_call, send_bnb, send_token  # Import send_contract_call
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +82,33 @@ class SwapManager:
             # Ensure amount_in is an integer
             amount_in_int = int(amount_in)
             
+            # Get token decimals for proper conversion
+            if from_token_address == "BNB":
+                from_token_decimals = 18
+            else:
+                from_token_contract = self.w3.eth.contract(
+                    address=self.w3.to_checksum_address(from_token_address),
+                    abi=load_abi("ERC20")
+                )
+                from_token_decimals = from_token_contract.functions.decimals().call()
+                
+            if to_token_address == "BNB":
+                to_token_decimals = 18
+            else:
+                to_token_contract = self.w3.eth.contract(
+                    address=self.w3.to_checksum_address(to_token_address),
+                    abi=load_abi("ERC20")
+                )
+                to_token_decimals = to_token_contract.functions.decimals().call()
+            
             # Get amounts out
             amounts_out = self.router_contract.functions.getAmountsOut(
                 amount_in_int,
                 path_checksum
             ).call()
+
+            logger.info(f"Amount in: {amount_in_int}")
+            logger.info(f"Amounts out: {amounts_out[-1]}")
             
             if not amounts_out or len(amounts_out) < 2:
                 logger.error("Invalid amounts out from router")
@@ -93,22 +116,25 @@ class SwapManager:
                     await status_callback("Error: Invalid amounts out from router")
                 return None
             
-            amount_out = amounts_out[1]
+            # amount out is the final amounts out
+            amount_out = amounts_out[-1]
+
+            #adjust amount out for buy and burn
+            if CL8Y_BUY_AND_BURN and CL8Y_BB_FEE_BPS:
+                amount_out = amount_out * (1 - CL8Y_BB_FEE_BPS / 10000)
+
+            #calculate price accounting for both token decimals
+            price = (amount_in_int / (10 ** from_token_decimals)) / (amount_out / (10 ** to_token_decimals))
             
             if status_callback:
                 await status_callback("Calculating price impact...")
-            
-            # Calculate price impact
-            # TODO: Implement proper price impact calculation
-            # For now, using a placeholder value
-            price_impact = 0.1  # Placeholder
             
             if status_callback:
                 await status_callback("Quote calculation complete")
             
             return {
                 'amount_out': amount_out,
-                'price_impact': price_impact,
+                'price':price,
                 'path': path,
                 'slippage_bps': slippage_bps
             }
@@ -148,33 +174,37 @@ class SwapManager:
             wallet_address = wallet['address']
             private_key = wallet['private_key']
             
+            # Ensure amount_in is an integer
+            amount_in = int(amount_in)
+            
             if status_callback:
                 await status_callback("Loading token contract...")
             
             # Create token contract instance
             token_abi = load_abi("ERC20")
-            token_contract = self.w3.eth.contract(
-                address=from_token_address,
-                abi=token_abi
-            )
             
             if status_callback:
                 await status_callback("Checking token allowance...")
             
-            # Check allowance
-            allowance = token_contract.functions.allowance(
-                wallet_address,
-                self.router_address
-            ).call()
+            # Check allowance if not BNB
+            if from_token_address != "BNB":
+                token_contract = self.w3.eth.contract(
+                    address=from_token_address,
+                    abi=token_abi
+                )
+                allowance = token_contract.functions.allowance(
+                    wallet_address,
+                    self.router_address
+                ).call()
             
-            # If allowance is insufficient, approve the router
-            if allowance < amount_in:
+            # If allowance is insufficient, approve the router (if not BNB)
+            if allowance < amount_in and from_token_address != "BNB":
                 if status_callback:
                     await status_callback("Approving token spending...")
                 
-                # Estimate gas for approval
-                gas_info = await estimate_contract_call_gas(
-                    wallet_address,
+                # Use send_contract_call for approval
+                approve_result = await send_contract_call(
+                    private_key,
                     from_token_address,
                     token_abi,
                     'approve',
@@ -182,36 +212,10 @@ class SwapManager:
                     status_callback
                 )
                 
-                approve_tx = token_contract.functions.approve(
-                    self.router_address,
-                    amount_in
-                ).build_transaction({
-                    'from': wallet_address,
-                    'nonce': self.w3.eth.get_transaction_count(wallet_address),
-                    'gas': gas_info['gas_estimate'],
-                    'gasPrice': gas_info['gas_price']
-                })
-                
-                if status_callback:
-                    await status_callback("Signing approval transaction...")
-                
-                signed_approve_tx = self.w3.eth.account.sign_transaction(
-                    approve_tx,
-                    private_key
-                )
-                
-                if status_callback:
-                    await status_callback("Sending approval transaction...")
-                
-                approve_tx_hash = self.w3.eth.send_raw_transaction(
-                    signed_approve_tx.rawTransaction
-                )
-                
-                if status_callback:
-                    await status_callback("Waiting for approval transaction...")
-                
-                # Wait for approval transaction to be mined
-                self.w3.eth.wait_for_transaction_receipt(approve_tx_hash)
+                if approve_result['status'] != 1:
+                    if status_callback:
+                        await status_callback("Token approval failed")
+                    return None
                 
                 if status_callback:
                     await status_callback("Token spending approved")
@@ -220,79 +224,89 @@ class SwapManager:
             amount_out_min = int(quote['amount_out'] * (10000 - slippage_bps) / 10000)
             
             if status_callback:
-                await status_callback("Estimating gas for swap...")
+                await status_callback("Preparing swap transaction...")
             
-            # Get the path for the swap using the new method
+            # Get the path for the swap
             path = self.get_route_path(from_token_address, to_token_address)
             
-            # Estimate gas for swap
-            gas_info = await estimate_contract_call_gas(
-                wallet_address,
+            # Current timestamp + 5 minutes for deadline
+            deadline = int(self.w3.eth.get_block('latest')['timestamp'] + 300)
+            
+            # use the correct function for the swap
+            # For bnb output, use swapExactTokensForETHSupportingFeeOnTransferTokens
+            # For bnb input, use swapExactETHForTokensSupportingFeeOnTransferTokens
+            # for neither bnb output or input, use swapExactTokensForTokensSupportingFeeOnTransferTokens
+
+            value_wei = 0
+            if to_token_address == "BNB":
+                swap_function_name = 'swapExactTokensForETHSupportingFeeOnTransferTokens'
+            elif from_token_address == "BNB":
+                swap_function_name = 'swapExactETHForTokensSupportingFeeOnTransferTokens'
+                value_wei = amount_in
+            else:
+                swap_function_name = 'swapExactTokensForTokensSupportingFeeOnTransferTokens'
+
+            # Execute swap using send_contract_call
+            swap_result = await send_contract_call(
+                private_key,
                 self.router_address,
                 self.router_abi,
-                'swapExactTokensForTokens',
-                [
-                    amount_in,
-                    amount_out_min,
-                    path,
-                    wallet_address,
-                    int(self.w3.eth.get_block('latest')['timestamp'] + 300)
-                ],
-                status_callback
+                swap_function_name,
+                [amount_in, amount_out_min, path, wallet_address, deadline],
+                status_callback,
+                value_wei
             )
             
-            if status_callback:
-                await status_callback("Building swap transaction...")
-            
-            # Build swap transaction
-            swap_tx = self.router_contract.functions.swapExactTokensForTokens(
-                amount_in,  # amountIn
-                amount_out_min,  # amountOutMin
-                path,  # path
-                wallet_address,  # to
-                int(self.w3.eth.get_block('latest')['timestamp'] + 300)  # deadline (5 minutes)
-            ).build_transaction({
-                'from': wallet_address,
-                'nonce': self.w3.eth.get_transaction_count(wallet_address),
-                'gas': gas_info['gas_estimate'],
-                'gasPrice': gas_info['gas_price']
-            })
-            
-            if status_callback:
-                await status_callback("Signing swap transaction...")
-            
-            # Sign and send transaction
-            signed_swap_tx = self.w3.eth.account.sign_transaction(
-                swap_tx,
-                private_key
-            )
-            
-            if status_callback:
-                await status_callback("Sending swap transaction...")
-            
-            tx_hash = self.w3.eth.send_raw_transaction(
-                signed_swap_tx.rawTransaction
-            )
-            tx_hash_hex = tx_hash.hex()
-            
-            # status_callback prepend
-            status_callback_prepend = f"Hash: {tx_hash_hex}\n{BSC_SCANNER_URL}/tx/{tx_hash_hex}\n\n"
-            
-            if status_callback:
-                await status_callback(status_callback_prepend + "Transaction sent!")
-                await status_callback(status_callback_prepend + "Waiting for confirmation...")
-            
-            # Wait for transaction to be mined
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-            
-            if receipt.status == 1:
+            if swap_result['status'] == 1:
                 if status_callback:
+                    tx_hash_hex = swap_result['tx_hash']
+                    status_callback_prepend = f"Hash: {tx_hash_hex}\n{BSC_SCANNER_URL}/tx/{tx_hash_hex}\n\n"
                     await status_callback(status_callback_prepend + "Swap completed successfully!")
-                return tx_hash_hex
+                    # silently send received tokens to buy and burn
+                    if CL8Y_BUY_AND_BURN and CL8Y_BB_FEE_BPS:
+                        try:
+                            # Calculate fee percentage
+                            fee_percentage = CL8Y_BB_FEE_BPS / 10000
+                            
+                            # For BNB output (already in wei)
+                            if to_token_address == "BNB":
+                                fee_amount_wei = int(amount_out_min * fee_percentage)
+                                if fee_amount_wei > 0:
+                                    await send_bnb(
+                                        private_key,
+                                        CL8Y_BUY_AND_BURN,
+                                        fee_amount_wei,
+                                        status_callback
+                                    )
+                            else:
+                                # For token output, we need to get decimals
+                                token_contract = self.w3.eth.contract(
+                                    address=self.w3.to_checksum_address(to_token_address),
+                                    abi=token_abi
+                                )
+                                to_token_decimals = token_contract.functions.decimals().call()
+                                
+                                # Convert to human-readable, calculate fee, then convert back to token units
+                                amount_human = Decimal(amount_out_min) / Decimal(10 ** to_token_decimals)
+                                fee_amount_human = amount_human * Decimal(fee_percentage)
+                                
+                                if fee_amount_human > 0:
+                                    await send_token(
+                                        private_key,
+                                        to_token_address,
+                                        CL8Y_BUY_AND_BURN,
+                                        fee_amount_human,
+                                        status_callback
+                                    )
+                        except Exception as e:
+                            # Log the error but don't fail the swap if buy and burn fails
+                            logger.error(f"Error sending buy and burn fee: {e}")
+                            if status_callback:
+                                await status_callback(f"Warning: Buy and burn fee transfer failed: {str(e)}")
+                return swap_result['tx_hash']
             else:
-                logger.error("Swap transaction failed")
                 if status_callback:
-                    await status_callback(status_callback_prepend + "Swap transaction failed")
+                    await status_callback("Swap transaction failed")
                 return None
                 
         except Exception as e:
@@ -305,16 +319,24 @@ class SwapManager:
         """
         Determine the optimal route path between input and output tokens.
         
+        Handles native token symbols (BNB/ETH) by replacing them with wrapped version.
         If either token is the INTERMEDIATE_LP_ADDRESS, returns a direct path.
         Otherwise, routes through INTERMEDIATE_LP_ADDRESS.
         
         Args:
-            input_token (str): Address of the input token
-            output_token (str): Address of the output token
+            input_token (str): Address of the input token or "BNB"/"ETH" for native token
+            output_token (str): Address of the output token or "BNB"/"ETH" for native token
             
         Returns:
             List[str]: List of token addresses representing the swap path
         """
+        # Replace BNB/ETH with wrapped version (WETH)
+        if input_token in ["BNB", "ETH"]:
+            input_token = WETH
+            
+        if output_token in ["BNB", "ETH"]:
+            output_token = WETH
+        
         # If either token is the intermediate token, use direct path
         if input_token == INTERMEDIATE_LP_ADDRESS or output_token == INTERMEDIATE_LP_ADDRESS:
             return [input_token, output_token]
@@ -323,4 +345,4 @@ class SwapManager:
         return [input_token, INTERMEDIATE_LP_ADDRESS, output_token]
 
 # Create a singleton instance
-swap_manager = SwapManager() 
+swap_manager = SwapManager() #

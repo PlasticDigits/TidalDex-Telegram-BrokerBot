@@ -265,7 +265,7 @@ async def send_token(
             'nonce': nonce,
             'gas': int(gas_estimate['gas_estimate']),
             'gasPrice': Wei(int(gas_estimate['gas_price'])),
-            'chainId': 56  # BSC mainnet
+            'chainId': w3.eth.chain_id
         })
         
         # Sign the transaction
@@ -329,10 +329,23 @@ async def send_contract_call(
     contract_abi: List[Dict[str, Any]],
     function_name: str,
     function_args: List[Any],
-    status_callback: Optional[Callable[[str], Awaitable[None]]] = None
+    status_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    value_wei: int = 0
 ) -> Dict[str, Union[str, int]]:
     """
     Call a contract address with a function name and arguments.
+    
+    Parameters:
+        from_private_key: The private key to send from
+        to_contract_address: The contract address to call
+        contract_abi: The contract ABI
+        function_name: The function name to call
+        function_args: The arguments to pass to the function
+        value_wei: Amount of native cryptocurrency to send with the call (in wei)
+        status_callback: Optional callback function for status updates
+        
+    Returns:
+        Dict containing transaction hash, status, and block number
     """
     if status_callback:
         await status_callback("Deriving sender address from private key...")
@@ -370,15 +383,18 @@ async def send_contract_call(
         status_callback
     )
     
-    # Check if we have enough BNB for gas
+    # Check if we have enough BNB for gas and value
     if status_callback:
-        await status_callback("Checking BNB balance for gas...")
+        await status_callback("Checking BNB balance for gas and value...")
     
     balance_wei = w3.eth.get_balance(checksum_from_address)
     balance_bnb = Decimal(w3.from_wei(balance_wei, 'ether'))
     
-    if gas_info['gas_wei'] > balance_wei:
-        error_msg = f"Insufficient BNB for gas. Need {gas_info['gas_bnb']} BNB but have {balance_bnb} BNB"
+    total_required_wei = gas_info['gas_wei'] + value_wei
+    total_required_bnb = Decimal(w3.from_wei(total_required_wei, 'ether'))
+    
+    if total_required_wei > balance_wei:
+        error_msg = f"Insufficient BNB. Need {total_required_bnb} BNB but have {balance_bnb} BNB"
         if status_callback:
             await status_callback(f"Error: {error_msg}")
         raise ValueError(error_msg)
@@ -396,6 +412,7 @@ async def send_contract_call(
         'gas': int(gas_info['gas_estimate']),
         'gasPrice': Wei(int(gas_info['gas_price'])),
         'chainId': w3.eth.chain_id,
+        'value': value_wei
     })
     
     # Sign transaction

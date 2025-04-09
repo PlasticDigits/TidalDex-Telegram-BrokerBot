@@ -125,7 +125,7 @@ def require_pin(verification_message: str = "This command requires your PIN for 
             
             if pin:
                 # PIN is already verified, store it in context for the handler
-                logger.info(f"Using verified PIN for {command_name} for user {user_id}")
+                logger.info(f"Using verified PIN for {command_name} for user {hash_user_id(user_id)}")
                 if context.user_data is not None:
                     context.user_data['pin'] = pin
                 return await handler_func(update, context)

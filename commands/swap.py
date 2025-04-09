@@ -457,7 +457,7 @@ async def enter_slippage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"From: {amount} {from_token['symbol']}\n"
             f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
             f"Slippage: {slippage_bps/100}%\n"
-            f"Price Impact: {quote['price_impact']}%\n\n"
+            f"Price: {quote['price']}\n\n"
             f"Do you want to proceed with the swap?",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -522,7 +522,7 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         f"From: {amount} {from_token['symbol']}\n"
         f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
         f"Slippage: {slippage_bps/100}%\n"
-        f"Price Impact: {quote['price_impact']}%\n\n"
+        f"Price: {quote['price']} {from_token['symbol']}/{to_token['symbol']}\n\n"
         f"Please wait while we execute the swap..."
     )
 

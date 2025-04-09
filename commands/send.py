@@ -751,7 +751,8 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"Token: {token_info['symbol']}\n"
                 f"Amount: {amount}\n"
                 f"Recipient: {valid_recipient[:10]}...{valid_recipient[-8:]}\n"
-                f"TX Hash: `{tx_result['tx_hash']}`\n"
+                f"TX Hash: `0x{tx_result['tx_hash']}`\n"
+                f"View on Scanner: {BSC_SCANNER_URL}/tx/{tx_result['tx_hash']}\n"
                 f"Block: {tx_result['block_number']}"
             )
             
