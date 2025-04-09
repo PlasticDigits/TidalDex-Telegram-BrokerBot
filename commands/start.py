@@ -15,6 +15,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Use /recover to restore a wallet from a recovery phrase or private key\n\n"
         f"💰 <b>Transactions</b>\n"
         f"• Use /send to send BNB or tokens\n"
+        f"• Use /swap to trade BNB or tokens\n"
         f"• Use /receive to get your wallet address\n"
         f"• Use /balance to check your balances\n\n"
         f"🔐 <b>Security</b>\n"

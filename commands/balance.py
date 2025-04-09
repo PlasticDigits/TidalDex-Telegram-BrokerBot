@@ -101,8 +101,8 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         msg_text.append(f"• {price_sym} ({price_name}): {price_balance}")
                 
                 msg_text.append("\nUse /send to transfer funds.")
-                msg_text.append("\nUse /scan to search for tokens.")
-                msg_text.append("\nUse /track to add balance display for a token.")
+                msg_text.append("Use /scan to search for tokens.")
+                msg_text.append("Use /track to add balance display for a token.")
                 
                 await message.reply_text(
                     "\n".join(msg_text),
@@ -129,6 +129,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         balance_msg_text.append(f"• {no_price_sym} ({no_price_name}): {no_price_balance}")
                 
                 balance_msg_text.append("\nUse /send to transfer funds.")
+                balance_msg_text.append("Use /swap to trade BNB or tokens.")
                 
                 await message.reply_text(
                     "\n".join(balance_msg_text),
@@ -156,6 +157,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     error_msg_text.append(f"• {error_sym} ({error_nm}): {error_bal}")
             
             error_msg_text.append("\nUse /send to transfer funds.")
+            error_msg_text.append("Use /swap to trade BNB or tokens.")
             
             await message.reply_text(
                 "\n".join(error_msg_text),

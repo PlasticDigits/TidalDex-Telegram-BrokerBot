@@ -10,6 +10,7 @@ import traceback
 from typing import Dict, Tuple, Optional, Any, Union
 from db.utils import hash_user_id
 from services.pin.PINManager import pin_manager
+from services.pin.pin_decorators import conversation_pin_helper
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ async def set_pin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not update.effective_user:
         logger.error("No effective user found in update")
         return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('set_pin_command', context, update, "Changing your PIN requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
         
     user_id: int = update.effective_user.id
     user_id_str: str = hash_user_id(user_id)

@@ -3,9 +3,10 @@ Command for stopping the tracking of token balances.
 """
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, User, Message
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from typing import List, Dict, Any, Optional, Union, Callable, cast
 from web3 import Web3
+from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
 from services import token_manager
 
@@ -26,6 +27,10 @@ async def track_stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
         
     user_id: int = user.id
+
+    helper_result: Optional[int] = await conversation_pin_helper('track_stop_command', context, update, "Stopping token tracking requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
     
     # Get existing tracked tokens for the user
     tracked_tokens = await token_manager.get_tracked_tokens(str(user_id))
@@ -143,6 +148,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 track_stop_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("track_stop", track_stop_command)],
     states={
+        PIN_REQUEST: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
+        PIN_FAILED: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
         TOKEN_SELECTION: [
             CallbackQueryHandler(process_token_selection, pattern=r"^stop_track_")
         ],

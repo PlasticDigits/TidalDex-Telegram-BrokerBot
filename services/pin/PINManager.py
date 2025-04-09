@@ -150,6 +150,12 @@ class PINManager:
         
         return True
     
+    def needs_to_verify_pin(self, user_id: int) -> bool:
+        """
+        Check if a user needs to verify their PIN.
+        """
+        return self.needs_pin(user_id) and not self.has_verified_pin(user_id)
+    
     def set_pin(self, user_id: int, pin: str) -> Tuple[bool, Optional[str]]:
         """
         Set a PIN for a user.
@@ -181,6 +187,12 @@ class PINManager:
             logger.error(f"Error setting PIN for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return False, str(e)
+        
+    def has_verified_pin(self, user_id: int) -> bool:
+        """
+        Check if a user has a verified PIN.
+        """
+        return self.get_pin(user_id) is not None
     
     def get_pin(self, user_id: int) -> Optional[str]:
         """

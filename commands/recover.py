@@ -10,6 +10,8 @@ from typing import Dict, List, Any, Optional, Union, Callable, cast, Coroutine
 from services.pin import require_pin, pin_manager
 from services.wallet import wallet_manager
 from db.wallet import WalletData
+from services.pin.pin_decorators import conversation_pin_helper
+
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,11 @@ async def recover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
         
     user_id: int = user.id
+    
+    helper_result: Optional[int] = await conversation_pin_helper('recover_command', context, update, "Wallet recovery requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
+    
     pin: Optional[str] = pin_manager.get_pin(user_id)
     
     # Get active wallet name - Convert user_id to string
@@ -264,9 +271,4 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
         
     await message.reply_text("Operation cancelled.")
-    return ConversationHandler.END 
-
-# Create a PIN-protected version of the command
-pin_protected_recover: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, int]] = require_pin(
-    "🔒 Wallet recovery requires PIN verification.\nPlease enter your PIN:"
-)(recover_command) 
+    return ConversationHandler.END

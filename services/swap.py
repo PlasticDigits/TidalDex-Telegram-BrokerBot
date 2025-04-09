@@ -12,7 +12,7 @@ from utils.gas_estimation import (
 )
 from utils.load_abi import load_abi
 from utils.config import get_env_var, BSC_SCANNER_URL, INTERMEDIATE_LP_ADDRESS
-from utils.status_updates import with_status_updates, create_status_callback
+from utils.status_updates import StatusCallback
 from utils.web3_connection import w3  # Import the shared Web3 connection
 
 logger = logging.getLogger(__name__)
@@ -46,14 +46,13 @@ class SwapManager:
             
             self._initialized = True
 
-    @with_status_updates("Swap Quote")
     async def get_swap_quote(
         self,
         from_token_address: str,
         to_token_address: str,
         amount_in: int,
         slippage_bps: int,
-        status_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        status_callback: StatusCallback
     ) -> Optional[Dict[str, Any]]:
         """Get a quote for a token swap using TidalDexRouter.
         
@@ -62,7 +61,7 @@ class SwapManager:
             to_token_address: Address of the token to swap to
             amount_in: Amount of from_token to swap (in wei)
             slippage_bps: Slippage tolerance in basis points (1% = 100)
-            
+            status_callback: StatusCallback
         Returns:
             Dictionary containing swap quote details or None if quote failed
         """
@@ -73,13 +72,19 @@ class SwapManager:
             # Get the path for the swap using the new method
             path: List[str] = self.get_route_path(from_token_address, to_token_address)
             
+            # Convert path addresses to checksum addresses
+            path_checksum = [self.w3.to_checksum_address(addr) for addr in path]
+            
             if status_callback:
                 await status_callback("Getting amounts out from router...")
             
+            # Ensure amount_in is an integer
+            amount_in_int = int(amount_in)
+            
             # Get amounts out
             amounts_out = self.router_contract.functions.getAmountsOut(
-                amount_in,
-                path
+                amount_in_int,
+                path_checksum
             ).call()
             
             if not amounts_out or len(amounts_out) < 2:
@@ -114,7 +119,6 @@ class SwapManager:
                 await status_callback(f"Error getting swap quote: {str(e)}")
             return None
 
-    @with_status_updates("Token Swap")
     async def execute_swap(
         self,
         wallet: Dict[str, Any],
@@ -123,7 +127,7 @@ class SwapManager:
         amount_in: int,
         slippage_bps: int,
         quote: Dict[str, Any],
-        status_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        status_callback: StatusCallback
     ) -> Optional[str]:
         """Execute a token swap using TidalDexRouter.
         

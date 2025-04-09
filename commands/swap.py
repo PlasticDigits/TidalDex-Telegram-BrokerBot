@@ -19,6 +19,8 @@ from services.swap import swap_manager
 from services import token_manager
 import traceback
 
+from services.pin.pin_decorators import conversation_pin_helper
+
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -33,24 +35,9 @@ MAX_SYMBOL_LENGTH: int = 20    # Token symbols are typically short
 # Default slippage in basis points (1% = 100)
 DEFAULT_SLIPPAGE_BPS: int = 100
 
-# Helper function to ensure status_callback always returns a proper awaitable
-async def ensure_awaitable(callback_result: Optional[Awaitable[None]]) -> None:
-    """Ensure callback result is properly awaited if it's not None."""
-    if callback_result is not None:
-        await callback_result
-
-# Create a properly typed wrapper for callbacks that works with external functions
-def create_callback_wrapper(status_callback: Callable[[str], Awaitable[None] | None]) -> Callable[[str], Awaitable[None]]:
-    """Create a properly typed callback wrapper that always returns an Awaitable[None]."""
-    async def wrapper(message: str) -> None:
-        result = status_callback(message)
-        if result is not None:
-            await result
-    return wrapper
-
 async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the swap process."""
-        
+
     if update.effective_user is None:
         logger.error("Effective user is None in swap_command")
         return ConversationHandler.END
@@ -63,6 +50,10 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     user_id_int: int = update.effective_user.id
     # For wallet manager, we need the user ID as a string
     user_id_str: str = str(user_id_int)
+
+    helper_result: Optional[int] = await conversation_pin_helper('swap_command', context, update, "Swapping tokens requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
     
     # Get active wallet name and use pin_manager for PIN
     wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(user_id_str)
@@ -113,7 +104,8 @@ async def swap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     await update.message.reply_text(
         f"🔍 Active Wallet: {wallet_name}\n\n"
-        "💱 What would you like to swap from?",
+        "💱 What would you like to swap from?\n\n"
+        "If your token is not listed, run /scan to find it or /track to add it to your wallet with the token address. (First /cancel to go back).",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     
@@ -360,8 +352,8 @@ async def enter_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 return ConversationHandler.END
         else:
             balance = await token_manager.get_token_balance(
-                from_token['address'],
-                user_wallet['address']
+                user_wallet['address'],
+                from_token['address']
             )
             if balance < amount * (10 ** from_token['decimals']):
                 await update.message.reply_text(
@@ -428,13 +420,28 @@ async def enter_slippage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         from_token = context.user_data['from_token']
         to_token = context.user_data['to_token']
         amount = context.user_data['amount']
+
+        response_text: str = (
+            f"Calculating swap quote...\n"
+            f"From token: {from_token['symbol']}\n"
+            f"To token: {to_token['symbol']}\n"
+            f"Amount: {amount} {from_token['symbol']}\n"
+            f"Slippage: {slippage_bps/100}%\n\n"
+            f"Please wait while we calculate the swap quote..."
+        )
+        
+        response = await update.message.reply_text(response_text)
+        
+        # Create a status callback using the utility function
+        status_callback = create_status_callback(response, max_lines=15, header_lines=6)
         
         # Use the swap_manager singleton
         quote = await swap_manager.get_swap_quote(
             from_token['address'],
             to_token['address'],
             amount * (10 ** from_token['decimals']),
-            slippage_bps
+            slippage_bps,
+            status_callback
         )
         
         if not quote:
@@ -510,7 +517,19 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     slippage_bps = context.user_data['slippage_bps']
     quote = context.user_data['quote']
     
-    await query.edit_message_text("Executing swap...")
+    response_text: str = (
+        f"Executing swap...\n"
+        f"From: {amount} {from_token['symbol']}\n"
+        f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
+        f"Slippage: {slippage_bps/100}%\n"
+        f"Price Impact: {quote['price_impact']}%\n\n"
+        f"Please wait while we execute the swap..."
+    )
+
+    response = await query.edit_message_text(response_text)
+
+    # Create a status callback using the utility function
+    status_callback = create_status_callback(response, max_lines=15, header_lines=6)
     
     # Use the swap_manager singleton
     tx_hash = await swap_manager.execute_swap(
@@ -519,7 +538,8 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         to_token['address'],
         amount * (10 ** from_token['decimals']),
         slippage_bps,
-        quote
+        quote,
+        status_callback
     )
     
     if not tx_hash:
@@ -536,9 +556,4 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         f"Price Impact: {quote['price_impact']}%"
     )
     
-    return ConversationHandler.END 
-
-# Create PIN-protected version of the swap command
-pin_protected_swap: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, int]] = require_pin(
-    "🔒 Swapping tokens requires PIN verification.\nPlease enter your PIN:"
-)(swap_command)
+    return ConversationHandler.END

@@ -47,6 +47,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
+        "/swap - Trade BNB or tokens\n"
         "/receive - Show your wallet address for receiving funds\n\n"
         
         "Token Tracking:\n"
@@ -100,6 +101,7 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "Transactions:\n"
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
+        "/swap - Trade BNB or tokens\n"
         "/receive - Show your wallet address for receiving funds\n\n"
         
         "Token Tracking:\n"

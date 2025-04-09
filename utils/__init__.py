@@ -1,6 +1,6 @@
 # Utility modules for the Telegram wallet bot 
 from utils.load_abi import load_abi 
-from utils.status_updates import with_status_updates, create_status_callback
+from utils.status_updates import create_status_callback
 from utils.web3_connection import w3, get_web3_connection
 from utils.config import get_env_var, BSC_RPC_URL, TELEGRAM_BOT_TOKEN, ENCRYPTION_KEY
 from utils.token_operations import get_token_contract, get_token_details, convert_to_raw_amount

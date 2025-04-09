@@ -27,31 +27,36 @@ from commands.wallet import wallet_command
 from commands.balance import pin_protected_balance
 from commands.receive import receive_command
 from commands.send import (
+    send_command,
     button_callback, 
     send_bnb_amount, send_bnb_address, 
     send_token_symbol, send_token_amount, send_token_address,
     CHOOSING_ACTION, SEND_BNB_AMOUNT, SEND_BNB_ADDRESS, 
-    SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS,
-    pin_protected_send
+    SEND_TOKEN_SYMBOL, SEND_TOKEN_AMOUNT, SEND_TOKEN_ADDRESS
 )
 from commands.lock import lock_command
 from commands.cancel import cancel
 from commands.recover import (
+    recover_command,
     recovery_choice_callback, 
     process_mnemonic, process_wallet_name as recovery_process_wallet_name,
-    pin_protected_recover, CHOOSING_RECOVERY_TYPE,
+    CHOOSING_RECOVERY_TYPE,
     WAITING_FOR_MNEMONIC, ENTERING_WALLET_NAME as RECOVERY_ENTERING_WALLET_NAME
 )
 from commands.backup import pin_protected_backup
 from commands.help import universal_help_command
-from commands.wallets import wallets_command, wallet_selection_callback, SELECTING_WALLET
+from commands.wallets import (
+    wallets_command, wallet_selection_callback, SELECTING_WALLET
+)
 from commands.addwallet import (
     action_choice_callback, process_wallet_name, process_private_key as add_process_private_key,
     CHOOSING_ACTION as ADD_CHOOSING_ACTION, ENTERING_NAME, ENTERING_PRIVATE_KEY,
-    pin_protected_addwallet
+    addwallet_command
 )
 from commands.export_key import pin_protected_export_key
-from commands.rename_wallet import rename_wallet_command, process_new_name, WAITING_FOR_NAME
+from commands.rename_wallet import (
+    rename_wallet_command, process_new_name, WAITING_FOR_NAME
+)
 from commands.set_pin import (
     set_pin_command, process_pin, confirm_pin, process_current_pin,
     ENTERING_PIN, CONFIRMING_PIN, ENTERING_CURRENT_PIN
@@ -67,9 +72,9 @@ from commands.swap import (
     swap_command, choose_from_token, choose_to_token, handle_custom_token_address,
     enter_amount, enter_slippage, confirm_swap,
     CHOOSING_FROM_TOKEN, CHOOSING_TO_TOKEN, ENTERING_AMOUNT, ENTERING_SLIPPAGE, CONFIRMING_SWAP,
-    pin_protected_swap
+    swap_command
 )
-
+from services.pin.pin_decorators import PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
 
@@ -133,15 +138,17 @@ def main() -> None:
     rename_wallet_wrapper = create_private_chat_wrapper(rename_wallet_command)
     lock_wrapper = create_private_chat_wrapper(lock_command)
 
+    # private chat wrappers for pin protected commands with ConversationHandler
+    swap_wrapper = create_private_chat_wrapper(swap_command)
+
     # private chat wrappers for pin protected commands
-    addwallet_wrapper = create_private_chat_wrapper(pin_protected_addwallet)
+    addwallet_wrapper = create_private_chat_wrapper(addwallet_command)
     export_key_wrapper = create_private_chat_wrapper(pin_protected_export_key)
-    send_wrapper = create_private_chat_wrapper(pin_protected_send)
+    send_wrapper = create_private_chat_wrapper(send_command)
     backup_wrapper = create_private_chat_wrapper(pin_protected_backup)
-    recover_wrapper = create_private_chat_wrapper(pin_protected_recover)
+    recover_wrapper = create_private_chat_wrapper(recover_command)
     balance_wrapper = create_private_chat_wrapper(pin_protected_balance)
     scan_wrapper = create_private_chat_wrapper(pin_protected_scan)
-    swap_wrapper = create_private_chat_wrapper(pin_protected_swap)
 
     # Add command handlers for public commands
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -155,11 +162,18 @@ def main() -> None:
     application.add_handler(CommandHandler("lock", lock_wrapper))
     application.add_handler(CommandHandler("backup", backup_wrapper))
     application.add_handler(CommandHandler("export_key", export_key_wrapper))
+    application.add_handler(CommandHandler("scan", scan_wrapper))
 
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("wallets", wallets_wrapper),CommandHandler("switch", wallets_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             #regex should match select_wallet:wallet_name and cancel_wallet_selection
             SELECTING_WALLET: [CallbackQueryHandler(wallet_selection_callback, pattern=r'^(wallets_.*)$')],
         },
@@ -170,6 +184,12 @@ def main() -> None:
     addwallet_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("addwallet", addwallet_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             ADD_CHOOSING_ACTION: [
                 CallbackQueryHandler(action_choice_callback, pattern=r'^(addwallet_.*)$')
             ],
@@ -188,6 +208,12 @@ def main() -> None:
     send_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("send", send_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             CHOOSING_ACTION: [CallbackQueryHandler(button_callback, pattern=r'^(send_.*)$')],
             SEND_BNB_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_bnb_amount)],
             SEND_BNB_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_bnb_address)],
@@ -202,6 +228,12 @@ def main() -> None:
     recover_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("recover", recover_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             CHOOSING_RECOVERY_TYPE: [CallbackQueryHandler(recovery_choice_callback, pattern=r'^(recover_.*)$')],
             WAITING_FOR_MNEMONIC: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_mnemonic)],
             RECOVERY_ENTERING_WALLET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recovery_process_wallet_name)],
@@ -213,6 +245,12 @@ def main() -> None:
     rename_wallet_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("rename_wallet", rename_wallet_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             WAITING_FOR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_name)],
         },
         fallbacks=[CommandHandler("cancel", cancel)]
@@ -222,6 +260,12 @@ def main() -> None:
     set_pin_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("set_pin", set_pin_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             ENTERING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_pin)],
             CONFIRMING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_pin)],
             ENTERING_CURRENT_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_current_pin)],
@@ -233,11 +277,19 @@ def main() -> None:
     swap_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("swap", swap_wrapper)],
         states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
             CHOOSING_FROM_TOKEN: [
-                CallbackQueryHandler(choose_from_token, pattern=r'^(swap_from_.*|swap_cancel)$')
+                CallbackQueryHandler(choose_from_token, pattern=r'^swap_from_.*$'),
+                CallbackQueryHandler(choose_from_token, pattern=r'^swap_cancel$')
             ],
             CHOOSING_TO_TOKEN: [
-                CallbackQueryHandler(choose_to_token, pattern=r'^(swap_to_.*|swap_cancel)$'),
+                CallbackQueryHandler(choose_to_token, pattern=r'^swap_to_.*$'),
+                CallbackQueryHandler(choose_to_token, pattern=r'^swap_cancel$'),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_token_address)
             ],
             ENTERING_AMOUNT: [
@@ -264,7 +316,6 @@ def main() -> None:
     # Add token tracking handlers
     application.add_handler(track_conv_handler)
     application.add_handler(track_stop_conv_handler)
-    application.add_handler(CommandHandler("scan", scan_wrapper))
     
     # Add delete all wallets handler
     application.add_handler(deletewalletsall_conv_handler)
@@ -305,6 +356,7 @@ def main() -> None:
         query = update.callback_query
         if query:
             logger.info(f"DEBUG: Received callback with data: {query.data}")
+            
         else:
             logger.warning("DEBUG: Received callback but update.callback_query is None")
         

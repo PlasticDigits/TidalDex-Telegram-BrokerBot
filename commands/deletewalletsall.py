@@ -6,13 +6,13 @@ for a user after confirmation.
 """
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message, User
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from typing import Dict, List, Any, Optional, Union, Callable, Coroutine, cast
 from services.wallet import wallet_manager, delete_wallets_all
 from services.pin import require_pin
 from db.utils import hash_user_id
 from db.wallet import WalletData
-
+from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,10 @@ async def deletewalletsall_command(update: Update, context: ContextTypes.DEFAULT
     if not user:
         logger.error("No user found in update")
         return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('deletewalletsall_command', context, update, "Deleting all wallets requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
     
     user_id: int = user.id
     user_id_str: str = hash_user_id(user_id)
@@ -127,6 +131,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 deletewalletsall_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("deletewalletsall", pin_protected_deletewalletsall)],
     states={
+        PIN_REQUEST: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
+        PIN_FAILED: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
         CONFIRMING_DELETE: [
             CallbackQueryHandler(process_confirmation, pattern=r"^delete_all_")
         ],

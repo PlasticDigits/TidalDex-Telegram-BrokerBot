@@ -70,6 +70,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"{private_key_wallets_info}"
                 "Use /addwallet to add more wallets or /rename\_wallet to rename the active wallet\.\n"
                 "Use /send to send funds\.\n"
+                "Use /swap to trade BNB or tokens\.\n"
                 "Use /receive to receive funds\.\n"
                 "Use /switch to switch to a different wallet\.",
                 parse_mode='MarkdownV2'
@@ -92,6 +93,7 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     f"✅ Created a new wallet named '{new_wallet_name}'\n\n"
                     f"Address: `{new_wallet_address}`\n\n"
                     "You can now use /send to send funds and /receive to view your address\.\n"
+                    "Use /swap to trade BNB or tokens\.\n"
                     "Use /addwallet to create additional wallets.\n\n"
                     "Important: Use /backup to save your recovery phrase\!",
                     parse_mode='MarkdownV2'

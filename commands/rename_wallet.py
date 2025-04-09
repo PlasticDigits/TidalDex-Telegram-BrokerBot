@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, cast
 from services.wallet import wallet_manager
 from services.pin import pin_manager
 from db.wallet import WalletData
+from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ async def rename_wallet_command(update: Update, context: ContextTypes.DEFAULT_TY
     if not user:
         logger.error("No user found in update")
         return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('rename_wallet_command', context, update, "Renaming a wallet requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
         
     user_id_int: int = user.id
     user_id_str: str = str(user_id_int)
@@ -148,6 +153,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 rename_wallet_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("rename_wallet", rename_wallet_command)],
     states={
+        PIN_REQUEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)],
+        PIN_FAILED: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)],
         WAITING_FOR_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_name)],
     },
     fallbacks=[CommandHandler("cancel", cancel)]

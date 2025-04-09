@@ -13,6 +13,8 @@ from web3 import Web3 as w3
 from decimal import Decimal
 from utils.config import BSC_SCANNER_URL
 from wallet.send import send_token, send_bnb
+from services.pin.pin_decorators import conversation_pin_helper
+
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,10 @@ async def send_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     user_id_int: int = update.effective_user.id
     # For wallet manager, we need the user ID as a string
     user_id_str: str = str(user_id_int)
+    
+    helper_result: Optional[int] = await conversation_pin_helper('send_command', context, update, "Sending funds requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
     
     # Get active wallet name and use pin_manager for PIN
     wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(user_id_str)
@@ -765,8 +771,3 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     
     return ConversationHandler.END
-
-# Create PIN-protected versions of the conversation handlers
-pin_protected_send: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, int]] = require_pin(
-    "🔒 Sending assets requires PIN verification.\nPlease enter your PIN:"
-)(send_command) 

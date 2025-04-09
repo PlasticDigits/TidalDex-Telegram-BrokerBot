@@ -5,6 +5,7 @@ from services.pin import pin_manager
 import logging
 from typing import Dict, List, Any, Optional, cast
 from db.wallet import WalletData
+from services.pin.pin_decorators import conversation_pin_helper
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -18,6 +19,10 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if user is None:
         logger.error("User is None in wallets_command")
         return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('wallets_command', context, update, "Viewing wallets requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
     
     user_id: int = user.id
     user_id_str: str = str(user_id)
@@ -117,7 +122,8 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(
             f"✅ Wallet '{selected_wallet_name}' is now active.\n\n"
             f"Address: `{address}`\n\n"
-            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds.",
+            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds.\n\n"
+            f"Use /swap to trade BNB or tokens.",
             parse_mode='Markdown'
         )
     else:

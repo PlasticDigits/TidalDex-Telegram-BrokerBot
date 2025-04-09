@@ -75,29 +75,24 @@ async def handle_pin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Try to execute the appropriate command handler
     try:
         # Import command handlers here to avoid circular imports
-        from commands.wallet import wallet_command
         from commands.backup import backup_command
         from commands.export_key import export_key_command
         from commands.addwallet import addwallet_command
-        from commands.send import send_command
         from commands.balance import balance_command
         from commands.scan import scan_command
-        from commands.swap import swap_command
-        
         # Map of command names to handlers
+        # Only works with commands that are not ConversationHandlers
         command_handlers: Dict[str, Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[Any]]] = {
-            'wallet_command': wallet_command,
             'backup_command': backup_command,
             'export_key_command': export_key_command,
-            'send_command': send_command,
             'addwallet_command': addwallet_command,
             'balance_command': balance_command,
             'scan_command': scan_command,
-            'swap_command': swap_command
             # Add more command handlers as needed
         }
         
         # Execute the appropriate handler
+        logger.info(f"Checking {pending_command} is in command_handlers")
         if pending_command in command_handlers:
             logger.info(f"Executing {pending_command} with verified PIN")
             await command_handlers[pending_command](update, context)

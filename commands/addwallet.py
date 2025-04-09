@@ -8,6 +8,8 @@ from utils.self_destruction_message import send_self_destructing_message
 from services.pin import require_pin, pin_manager
 from services.wallet import wallet_manager
 from db.wallet import WalletData
+from services.pin.pin_decorators import conversation_pin_helper
+
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,14 @@ async def addwallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if update.message is None:
         logger.error("Update message is None in addwallet_command")
         return ConversationHandler.END
+    
+    if update.effective_user is None:
+        logger.error("Effective user is None in addwallet_command")
+        return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('addwallet_command', context, update, "Adding a wallet requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
         
     keyboard: List[List[InlineKeyboardButton]] = [
         [InlineKeyboardButton("Create New Wallet", callback_data='addwallet_create')],
@@ -342,9 +352,4 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Clean up temp data
     del user_temp_data[user_id]
-    return ConversationHandler.END 
-
-# Create a PIN-protected version of the command
-pin_protected_addwallet: Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, int]] = require_pin(
-    "🔒 Adding a wallet requires PIN verification.\nPlease enter your PIN:"
-)(addwallet_command) 
+    return ConversationHandler.END

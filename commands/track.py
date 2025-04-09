@@ -3,13 +3,15 @@ Command for tracking token balances.
 """
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, User, Message, MaybeInaccessibleMessage
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, ExtBot, CallbackContext
+from telegram.ext import MessageHandler, filters, ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, ExtBot, CallbackContext
 from typing import List, Dict, Any, Optional, Union, Callable, TypeVar, Awaitable, cast
 
 from services import token_manager
 from services.wallet import get_active_wallet_name, get_wallet_by_name
 from utils.token_utils import get_token_info, format_token_balance
 from utils.web3_connection import w3
+from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
+
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -28,6 +30,10 @@ async def track_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user: Optional[User] = update.effective_user
     if not user:
         return ConversationHandler.END
+    
+    helper_result: Optional[int] = await conversation_pin_helper('track_command', context, update, "Tracking a token requires your PIN for security. Please enter your PIN.")
+    if helper_result is not None:
+        return helper_result
         
     user_id: int = user.id
     
@@ -195,6 +201,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 track_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = ConversationHandler(
     entry_points=[CommandHandler("track", track_command)],
     states={
+        PIN_REQUEST: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
+        PIN_FAILED: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+        ],
         TOKEN_INPUT: [
             CallbackQueryHandler(process_token_address)
         ],
