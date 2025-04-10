@@ -16,6 +16,7 @@ from utils.status_updates import StatusCallback
 from utils.web3_connection import w3  # Import the shared Web3 connection
 from wallet.send import send_contract_call, send_bnb, send_token  # Import send_contract_call
 from services import token_manager  # Import the singleton token_manager instance
+from db.utils import hash_user_id
 
 logger = logging.getLogger(__name__)
 
