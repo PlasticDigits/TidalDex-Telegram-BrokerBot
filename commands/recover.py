@@ -11,6 +11,7 @@ from services.pin import require_pin, pin_manager
 from services.wallet import wallet_manager
 from db.wallet import WalletData
 from services.pin.pin_decorators import conversation_pin_helper
+from db.utils import hash_user_id
 
 # Enable logging
 logger = logging.getLogger(__name__)

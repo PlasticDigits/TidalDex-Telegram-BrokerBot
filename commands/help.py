@@ -5,6 +5,7 @@ from services.wallet import get_active_wallet_name, has_user_wallet
 from services.pin import pin_manager
 import logging
 from db.wallet import WalletData
+from db.utils import hash_user_id
 
 # Enable logging
 logger = logging.getLogger(__name__)

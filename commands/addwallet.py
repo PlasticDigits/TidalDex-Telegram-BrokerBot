@@ -9,6 +9,7 @@ from services.pin import require_pin, pin_manager
 from services.wallet import wallet_manager
 from db.wallet import WalletData
 from services.pin.pin_decorators import conversation_pin_helper
+from db.utils import hash_user_id
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -80,10 +81,10 @@ async def action_choice_callback(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
         
     choice: str = query.data
-    logger.info(f"User {user_id} chose {choice}")
+    logger.info(f"User {hash_user_id(user_id)} chose {choice}")
     # Initialize user temp data
     user_temp_data[user_id] = {'action': choice}
-    logger.info(f"User temp data initialized for user {user_id}")
+    logger.info(f"User temp data initialized for user {hash_user_id(user_id)}")
 
     logger.info("Editing message text to prompt user for wallet name")
     await query.edit_message_text(

@@ -18,8 +18,9 @@ from web3.types import ChecksumAddress
 from services.swap import swap_manager
 from services import token_manager
 import traceback
-
+from utils.number_display import number_display_with_sigfig
 from services.pin.pin_decorators import conversation_pin_helper
+from db.utils import hash_user_id
 
 # Enable logging
 logger = logging.getLogger(__name__)
@@ -454,10 +455,10 @@ async def enter_slippage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Show swap preview
         await update.message.reply_text(
             f"Swap Preview:\n\n"
-            f"From: {amount} {from_token['symbol']}\n"
-            f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
+            f"From: {number_display_with_sigfig(amount, 6)} {from_token['symbol']}\n"
+            f"To: {number_display_with_sigfig(quote['amount_out'] / (10 ** to_token['decimals']), 6)} {to_token['symbol']}\n"
             f"Slippage: {slippage_bps/100}%\n"
-            f"Price: {quote['price']}\n\n"
+            f"Price: {number_display_with_sigfig(quote['price'],6)} {from_token['symbol']}/{to_token['symbol']}\n\n"
             f"Do you want to proceed with the swap?",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -519,10 +520,10 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     response_text: str = (
         f"Executing swap...\n"
-        f"From: {amount} {from_token['symbol']}\n"
-        f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
+        f"From: {number_display_with_sigfig(amount, 6)} {from_token['symbol']}\n"
+        f"To: {number_display_with_sigfig(quote['amount_out'] / (10 ** to_token['decimals']), 6)} {to_token['symbol']}\n"
         f"Slippage: {slippage_bps/100}%\n"
-        f"Price: {quote['price']} {from_token['symbol']}/{to_token['symbol']}\n\n"
+        f"Price: {number_display_with_sigfig(quote['price'],6)} {from_token['symbol']}/{to_token['symbol']}\n\n"
         f"Please wait while we execute the swap..."
     )
 
@@ -533,6 +534,7 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     # Use the swap_manager singleton
     tx_hash = await swap_manager.execute_swap(
+        user_id_str,
         user_wallet,
         from_token['address'],
         to_token['address'],
@@ -549,11 +551,11 @@ async def confirm_swap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Show transaction details
     await query.edit_message_text(
         f"Swap executed successfully!\n\n"
-        f"Transaction: {BSC_SCANNER_URL}/tx/{tx_hash}\n"
-        f"From: {amount} {from_token['symbol']}\n"
-        f"To: {quote['amount_out'] / (10 ** to_token['decimals'])} {to_token['symbol']}\n"
+        f"Transaction: {BSC_SCANNER_URL}/tx/0x{tx_hash}\n"
+        f"From: {number_display_with_sigfig(amount, 6)} {from_token['symbol']}\n"
+        f"To: {number_display_with_sigfig(quote['amount_out'] / (10 ** to_token['decimals']), 6)} {to_token['symbol']}\n"
         f"Slippage: {slippage_bps/100}%\n"
-        f"Price Impact: {quote['price_impact']}%"
+        f"Price: {number_display_with_sigfig(quote['price'],6)} {from_token['symbol']}/{to_token['symbol']}"
     )
     
     return ConversationHandler.END

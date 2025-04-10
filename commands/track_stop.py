@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Callbac
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from typing import List, Dict, Any, Optional, Union, Callable, cast
 from web3 import Web3
+from db.utils import hash_user_id
 from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
 from services import token_manager
@@ -124,7 +125,7 @@ async def process_token_selection(update: Update, context: ContextTypes.DEFAULT_
             "Balance history for this token will be preserved, but no new balances will be recorded."
         )
         
-        logger.info(f"User {user_id} stopped tracking token {symbol} ({token_address})")
+        logger.info(f"User {hash_user_id(user_id)} stopped tracking token {symbol} ({token_address})")
         
         return ConversationHandler.END
         

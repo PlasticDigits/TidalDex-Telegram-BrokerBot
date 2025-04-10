@@ -9,6 +9,7 @@ from services.wallet import wallet_manager
 from services.pin import pin_manager
 from db.wallet import WalletData
 from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
+from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 

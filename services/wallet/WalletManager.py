@@ -71,11 +71,11 @@ class WalletManager:
         """
         wallet_name: Optional[str] = self.get_active_wallet_name(user_id)
         if not wallet_name:
-            logger.error(f"No active wallet found for user {user_id}")
+            logger.error(f"No active wallet found for user {hash_user_id(user_id)}")
             return {'status': 'error', 'message': 'No active wallet found'}
         wallet_data: Optional[WalletData] = self.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet_data:
-            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            logger.error(f"Wallet {wallet_name} not found for user {hash_user_id(user_id)}")
             return {'status': 'error', 'message': f'Wallet {wallet_name} not found'}
         
         # Wrap the status_callback to match the expected signature
@@ -91,11 +91,11 @@ class WalletManager:
         """
         wallet_name: Optional[str] = self.get_active_wallet_name(user_id)
         if not wallet_name:
-            logger.error(f"No active wallet found for user {user_id}")
+            logger.error(f"No active wallet found for user {hash_user_id(user_id)}")
             return {'status': 'error', 'message': 'No active wallet found'}
         wallet_data: Optional[WalletData] = self.get_wallet_by_name(user_id, wallet_name, pin)
         if not wallet_data:
-            logger.error(f"Wallet {wallet_name} not found for user {user_id}")
+            logger.error(f"Wallet {wallet_name} not found for user {hash_user_id(user_id)}")
             return {'status': 'error', 'message': f'Wallet {wallet_name} not found'}
         
         # Wrap the status_callback to match the expected signature
@@ -300,7 +300,7 @@ class WalletManager:
         # first, check if the user has a mnmoenic
         # if so, throw an error
         if self.has_user_mnemonic(user_id):
-            logger.error(f"User {user_id} already has a mnemonic")
+            logger.error(f"User {hash_user_id(user_id)} already has a mnemonic")
             return None
         
         # create a new mnemonic using bip39
@@ -329,7 +329,7 @@ class WalletManager:
             # Check if the wallet already exists
             existing_wallet: Optional[WalletData] = self.get_wallet_by_name(user_id, wallet_name, pin)
             if existing_wallet:
-                logger.error(f"Wallet with name '{wallet_name}' already exists for user {user_id}")
+                logger.error(f"Wallet with name '{wallet_name}' already exists for user {hash_user_id(user_id)}")
                 return None
             
             # Get the user's mnemonic
@@ -344,7 +344,7 @@ class WalletManager:
             # Determine the next derivation path index
             next_index: Union[int, None] = get_user_mnemonic_index(user_id)
             if next_index is None:
-                logger.error(f"No mnemonic index found for user {user_id}")
+                logger.error(f"No mnemonic index found for user {hash_user_id(user_id)}")
                 return None
             
             wallet_derivation_path: str = f"m/44'/60'/0'/0/{next_index}"
@@ -366,7 +366,7 @@ class WalletManager:
             # Save the wallet
             success: bool = self.save_user_wallet(user_id, new_wallet_data, wallet_name, pin)
             if not success:
-                logger.error(f"Failed to save wallet '{wallet_name}' for user {user_id}")
+                logger.error(f"Failed to save wallet '{wallet_name}' for user {hash_user_id(user_id)}")
                 return None
 
             # If this is the first wallet, set it as active
@@ -385,7 +385,7 @@ class WalletManager:
             
             return public_wallet_data
         except Exception as e:
-            logger.error(f"Error creating wallet for user {user_id}: {e}")
+            logger.error(f"Error creating wallet for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return None
     
@@ -406,7 +406,7 @@ class WalletManager:
             # Check if the wallet already exists
             existing_wallet: Optional[WalletData] = self.get_wallet_by_name(user_id, wallet_name, pin)
             if existing_wallet:
-                logger.error(f"Wallet with name '{wallet_name}' already exists for user {user_id}")
+                logger.error(f"Wallet with name '{wallet_name}' already exists for user {hash_user_id(user_id)}")
                 return None
             
             # Convert the private key to a checksum address
@@ -425,7 +425,7 @@ class WalletManager:
             # Check if a wallet with this address already exists for the user
             existing_wallet_by_address: Optional[WalletData] = self.get_wallet_by_address(user_id, address, pin)
             if existing_wallet_by_address:
-                logger.error(f"Wallet with address '{address}' already exists for user {user_id}")
+                logger.error(f"Wallet with address '{address}' already exists for user {hash_user_id(user_id)}")
                 return None
             
             # Create the wallet data
@@ -439,7 +439,7 @@ class WalletManager:
             # Save the wallet
             success: bool = self.save_user_wallet(user_id, wallet_data, wallet_name, pin)
             if not success:
-                logger.error(f"Failed to save wallet '{wallet_name}' for user {user_id}")
+                logger.error(f"Failed to save wallet '{wallet_name}' for user {hash_user_id(user_id)}")
                 return None
             
             # Get all current wallets to check if this is the first one
@@ -458,7 +458,7 @@ class WalletManager:
             
             return public_wallet_data
         except Exception as e:
-            logger.error(f"Error importing wallet for user {user_id}: {e}")
+            logger.error(f"Error importing wallet for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return None
     
@@ -511,7 +511,7 @@ class WalletManager:
             
             return True
         except Exception as e:
-            logger.error(f"Error renaming wallet for user {user_id}: {e}")
+            logger.error(f"Error renaming wallet for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return False
     
@@ -582,22 +582,22 @@ class WalletManager:
             success_wallets = True
             for wallet_name, wallet_data in wallets.items():
                 if not delete_user_wallet(user_id, wallet_name):
-                    logger.error(f"Failed to delete wallet {wallet_name} for user {user_id}")
+                    logger.error(f"Failed to delete wallet {wallet_name} for user {hash_user_id(user_id)}")
                     success_wallets = False
             
             if not success_wallets:
-                logger.error(f"Failed to delete all wallets for user {user_id}")
+                logger.error(f"Failed to delete all wallets for user {hash_user_id(user_id)}")
                 return False
             
             # Delete the mnemonic
             success_mnemonic: bool = delete_user_mnemonic(user_id)
             if not success_mnemonic:
-                logger.error(f"Failed to delete mnemonic for user {user_id}")
+                logger.error(f"Failed to delete mnemonic for user {hash_user_id(user_id)}")
                 return False
             
             return True
         except Exception as e:
-            logger.error(f"Error deleting all wallets for user {user_id}: {e}")
+            logger.error(f"Error deleting all wallets for user {hash_user_id(user_id)}: {e}")
             logger.error(traceback.format_exc())
             return False
     

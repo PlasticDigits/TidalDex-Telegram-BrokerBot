@@ -23,7 +23,7 @@ def save_user_pin(user_id: Union[int, str], pin: str) -> bool:
         True if successful, False otherwise
     """
     if not pin:
-        logger.warning(f"Invalid PIN provided for user {user_id}")
+        logger.warning(f"Invalid PIN provided for user {hash_user_id(user_id)}")
         return False
     
     # Hash the user ID for database lookup

@@ -15,6 +15,7 @@ from utils.config import get_env_var, BSC_SCANNER_URL, INTERMEDIATE_LP_ADDRESS, 
 from utils.status_updates import StatusCallback
 from utils.web3_connection import w3  # Import the shared Web3 connection
 from wallet.send import send_contract_call, send_bnb, send_token  # Import send_contract_call
+from services import token_manager  # Import the singleton token_manager instance
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ class SwapManager:
 
     async def execute_swap(
         self,
+        user_id_str: str,
         wallet: Dict[str, Any],
         from_token_address: str,
         to_token_address: str,
@@ -173,6 +175,8 @@ class SwapManager:
             # Get wallet address and private key
             wallet_address = wallet['address']
             private_key = wallet['private_key']
+
+            
             
             # Ensure amount_in is an integer
             amount_in = int(amount_in)
@@ -260,7 +264,7 @@ class SwapManager:
             if swap_result['status'] == 1:
                 if status_callback:
                     tx_hash_hex = swap_result['tx_hash']
-                    status_callback_prepend = f"Hash: {tx_hash_hex}\n{BSC_SCANNER_URL}/tx/{tx_hash_hex}\n\n"
+                    status_callback_prepend = f"Hash: 0x{tx_hash_hex}\n{BSC_SCANNER_URL}/tx/0x{tx_hash_hex}\n\n"
                     await status_callback(status_callback_prepend + "Swap completed successfully!")
                     # silently send received tokens to buy and burn
                     if CL8Y_BUY_AND_BURN and CL8Y_BB_FEE_BPS:
@@ -296,13 +300,26 @@ class SwapManager:
                                         to_token_address,
                                         CL8Y_BUY_AND_BURN,
                                         fee_amount_human,
-                                        status_callback
+                                        None # send silently
                                     )
                         except Exception as e:
                             # Log the error but don't fail the swap if buy and burn fails
                             logger.error(f"Error sending buy and burn fee: {e}")
                             if status_callback:
                                 await status_callback(f"Warning: Buy and burn fee transfer failed: {str(e)}")
+                    # If the received token is not tracked, track it.
+                    if to_token_address != "BNB":
+                        try:
+                            if not token_manager.is_token_tracked(user_id_str, to_token_address):
+                                track_success = await token_manager.track(user_id_str, to_token_address)
+                                if track_success:
+                                    logger.info(f"Started tracking newly received token {to_token_address} for user {wallet['user_id']}")
+                                else:
+                                    logger.warning(f"Could not track token {to_token_address} after swap for user {wallet['user_id']}")
+                        except Exception as e:
+                            logger.error(f"Failed to track token {to_token_address} after swap: {e}")
+                            # Don't fail the swap if tracking fails
+                            pass
                 return swap_result['tx_hash']
             else:
                 if status_callback:
@@ -345,4 +362,4 @@ class SwapManager:
         return [input_token, INTERMEDIATE_LP_ADDRESS, output_token]
 
 # Create a singleton instance
-swap_manager = SwapManager() #
+swap_manager = SwapManager()

@@ -7,6 +7,7 @@ from db.wallet import WalletData
 import logging
 import qrcode
 from io import BytesIO
+from db.utils import hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)

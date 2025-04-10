@@ -14,7 +14,8 @@ from decimal import Decimal
 from utils.config import BSC_SCANNER_URL
 from wallet.send import send_token, send_bnb
 from services.pin.pin_decorators import conversation_pin_helper
-
+from utils.number_display import number_display_with_sigfig
+from db.utils import hash_user_id
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -749,10 +750,10 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
             success_message = (
                 f"✅ Transaction successful!\n\n"
                 f"Token: {token_info['symbol']}\n"
-                f"Amount: {amount}\n"
+                f"Amount: {number_display_with_sigfig(amount, 6)}\n"
                 f"Recipient: {valid_recipient[:10]}...{valid_recipient[-8:]}\n"
                 f"TX Hash: `0x{tx_result['tx_hash']}`\n"
-                f"View on Scanner: {BSC_SCANNER_URL}/tx/{tx_result['tx_hash']}\n"
+                f"View on Scanner: {BSC_SCANNER_URL}/tx/0x{tx_result['tx_hash']}\n"
                 f"Block: {tx_result['block_number']}"
             )
             

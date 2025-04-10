@@ -113,7 +113,7 @@ async def send_bnb(
     tx_hash_hex = tx_hash.hex()
 
     # status_callback prepend
-    status_callback_prepend = f"Hash: {tx_hash_hex}\n{BSC_SCANNER_URL}/tx/0x{tx_hash_hex})\n\n"
+    status_callback_prepend = f"Hash: 0x{tx_hash_hex}\n{BSC_SCANNER_URL}/tx/0x{tx_hash_hex})\n\n"
     
     if status_callback:
         await status_callback(status_callback_prepend + "Transaction sent! ")
@@ -282,7 +282,7 @@ async def send_token(
         tx_hash_hex = tx_hash.hex()
         
         if status_callback:
-            await status_callback(f"Transaction sent with hash: {tx_hash_hex}")
+            await status_callback(f"Transaction sent with hash: 0x{tx_hash_hex}")
             await status_callback("Waiting for transaction confirmation...")
         
         # Wait for transaction receipt
@@ -429,7 +429,7 @@ async def send_contract_call(
     tx_hash_hex = tx_hash.hex()
     
     if status_callback:
-        await status_callback(f"Transaction sent! Hash: {tx_hash_hex}")
+        await status_callback(f"Transaction sent! Hash: 0x{tx_hash_hex}")
         await status_callback("Waiting for confirmation...")
     
     # Wait for receipt

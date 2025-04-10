@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Any, Optional, cast
 from db.wallet import WalletData
 from services.pin.pin_decorators import conversation_pin_helper
+from db.utils import hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -116,8 +117,6 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
     
     if success:
         address: str = wallet.get('address', '')
-        if len(address) > 20:
-            address = f"{address[:10]}...{address[-10:]}"
             
         await query.edit_message_text(
             f"✅ Wallet '{selected_wallet_name}' is now active.\n\n"

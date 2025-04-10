@@ -40,7 +40,7 @@ def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str]
     # If a PIN is provided directly, use it
     if pin:
         # Log that we're using a provided PIN
-        logger.debug(f"Using provided PIN for encryption/decryption for user {user_id}")
+        logger.debug(f"Using provided PIN for encryption/decryption for user {hash_user_id(user_id)}")
         # Combine user_id and PIN for better security
         pin_bytes: bytes = str(pin).encode()
         combined_input = user_id_bytes + b":" + pin_bytes

@@ -24,7 +24,7 @@ def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[st
         True if successful, False otherwise
     """
     if not mnemonic:
-        logger.warning(f"No mnemonic provided for user {user_id}")
+        logger.warning(f"No mnemonic provided for user {hash_user_id(user_id)}")
         return False
     
     # Hash the user ID for database storage

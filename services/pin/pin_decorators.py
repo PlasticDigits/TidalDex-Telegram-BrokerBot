@@ -10,7 +10,7 @@ from typing import Callable, Any, Optional, TypeVar, cast
 from telegram import Update, CallbackQuery
 from telegram.ext import ContextTypes
 from services.pin.PINManager import pin_manager
-from services.pin.PINManager import hash_user_id
+from db.utils import hash_user_id
 from telegram.ext import ConversationHandler
 logger = logging.getLogger(__name__)
 
@@ -113,11 +113,11 @@ def require_pin(verification_message: str = "This command requires your PIN for 
             user_id: int = update.effective_user.id
             command_name: str = handler_func.__name__
 
-            logger.info(f"Checking PIN for user {user_id} for command {command_name}")
+            logger.info(f"Checking PIN for user {hash_user_id(user_id)} for command {command_name}")
             
             # Check if user needs PIN verification
             if not pin_manager.needs_pin(user_id):
-                logger.info(f"No PIN required for user {user_id}, executing {command_name} directly")
+                logger.info(f"No PIN required for user {hash_user_id(user_id)}, executing {command_name} directly")
                 return await handler_func(update, context)
             
             # Check if we already have a verified PIN

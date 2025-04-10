@@ -16,8 +16,10 @@ import httpx
 from utils.config import BSC_RPC_URL
 from typing import Callable, Coroutine
 from services.pin import require_pin
+from utils.number_display import number_display_with_sigfig
 from utils.token_utils import format_token_balance
 from telegram.ext import ConversationHandler
+from db.utils import hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -62,7 +64,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         balance_bnb: Decimal = Decimal(w3.from_wei(balance_wei, 'ether'))
         
         # Format with comma separators and fixed decimal places
-        formatted_balance: str = f"{balance_bnb:,.4f}"
+        formatted_balance: str = f"{number_display_with_sigfig(balance_bnb, 6)}"
         
         # Get token balances
         try:
@@ -78,7 +80,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 price_data: Dict[str, str] = price_response.json()
                 bnb_price: float = float(price_data['price'])
                 usd_value: float = float(balance_bnb) * bnb_price
-                formatted_usd: str = f"${usd_value:,.2f}"
+                formatted_usd: str = f"${number_display_with_sigfig(usd_value, 6)}"
                 
                 # Build message with BNB balance
                 msg_text: List[str] = [
@@ -103,6 +105,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 msg_text.append("\nUse /send to transfer funds.")
                 msg_text.append("Use /scan to search for tokens.")
                 msg_text.append("Use /track to add balance display for a token.")
+                msg_text.append("Use /swap to trade tokens.")
                 
                 await message.reply_text(
                     "\n".join(msg_text),

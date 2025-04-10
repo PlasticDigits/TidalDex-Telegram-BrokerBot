@@ -12,6 +12,7 @@ from utils.token_utils import get_token_info, format_token_balance
 from utils.web3_connection import w3
 from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
+from db.utils import hash_user_id
 
 # Configure module logger
 logger = logging.getLogger(__name__)

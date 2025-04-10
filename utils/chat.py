@@ -1,6 +1,7 @@
 from typing import Any, Callable, Awaitable, Optional, Coroutine
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
+from db.utils import hash_user_id
 
 async def private_chat_only(
     update: Update, 
