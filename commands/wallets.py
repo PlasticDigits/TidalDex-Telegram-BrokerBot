@@ -119,11 +119,14 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
         address: str = wallet.get('address', '')
             
         await query.edit_message_text(
-            f"✅ Wallet '{selected_wallet_name}' is now active.\n\n"
+            f"✅ Wallet '{selected_wallet_name}' is now active\\.\n\n"
             f"Address: `{address}`\n\n"
-            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds.\n\n"
-            f"Use /swap to trade BNB or tokens.",
-            parse_mode='Markdown'
+            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds\\.\n\n"
+            f"Use /swap to trade BNB or tokens\\.\n\n"
+            f"🔐 **Security**\n"
+            f"• Use /set\\_pin to set or change a PIN for your wallet\n"
+            f"• Use /backup to save your recovery phrase\n",
+            parse_mode='MarkdownV2'
         )
     else:
         await query.edit_message_text(

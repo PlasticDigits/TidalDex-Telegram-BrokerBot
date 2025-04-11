@@ -321,7 +321,7 @@ async def process_private_key(update: Update, context: ContextTypes.DEFAULT_TYPE
             'private_key': private_key,
             'name': wallet_name,
             'is_active': False,
-            'imported': True
+            'is_imported': True
         }
         
         user_id_str = str(user_id)

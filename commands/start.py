@@ -20,4 +20,5 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"• Use /balance to check your balances\n\n"
         f"🔐 <b>Security</b>\n"
         f"• Use /set_pin to set or change a PIN for your wallet\n"
+        f"• Use /backup to save your recovery phrase\n"
     ) 

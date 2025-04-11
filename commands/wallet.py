@@ -65,14 +65,16 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if update.message is not None:
             # use MarkdownV2 without html or error handling
             await update.message.reply_text(
-                f"🔑 Your wallets \({len(all_wallets)}\):\n\n"
+                f"🔑 Your wallets \\({len(all_wallets)}\\):\n\n"
                 f"{mnemonic_wallets_info}"
                 f"{private_key_wallets_info}"
-                "Use /addwallet to add more wallets or /rename\_wallet to rename the active wallet\.\n"
-                "Use /send to send funds\.\n"
-                "Use /swap to trade BNB or tokens\.\n"
-                "Use /receive to receive funds\.\n"
-                "Use /switch to switch to a different wallet\.",
+                "Use /addwallet to add more wallets or /rename\\_wallet to rename the active wallet\\.\n"
+                "Use /send to send funds\\.\n"
+                "Use /swap to trade BNB or tokens\\.\n"
+                "Use /receive to receive funds\\.\n"
+                "Use /switch to switch to a different wallet\\.\n"
+                f"🔐 **Security**\n"
+                f"• Use /set\\_pin to set or change a PIN for your wallet\n",
                 parse_mode='MarkdownV2'
             )
     else:
@@ -95,7 +97,9 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     "You can now use /send to send funds and /receive to view your address\\.\n"
                     "Use /swap to trade BNB or tokens\\.\n"
                     "Use /addwallet to create additional wallets\\.\n\n"
-                    "Important: Use /backup to save your recovery phrase\\!",
+                    f"🔐 **Security**\n"
+                    f"• Use /set\\_pin to set or change a PIN for your wallet\n"
+                    f"• Important: Use /backup to save your recovery phrase\\!",
                     parse_mode='MarkdownV2'
                 )
             elif update.message is not None:

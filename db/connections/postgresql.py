@@ -338,8 +338,8 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
         logger.debug(f"Modified query: {pg_query}")
         
         # Identify boolean columns and convert integer parameters (0/1) to boolean values
-        # Look for column names like "imported", "is_active", etc.
-        boolean_column_names = ["imported", "is_active", "active"]
+        # Look for column names like "is_", "has_".
+        boolean_column_names = ["is_", "has_"]
         boolean_column_indices = []
         
         # Identify boolean columns in the query
@@ -354,19 +354,45 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
                     if any(bool_name in col.lower() for bool_name in boolean_column_names):
                         boolean_column_indices.append(i)
                         logger.debug(f"Identified boolean column: {col} at index {i}")
+        # For UPDATE queries with boolean columns
+        elif "UPDATE" in pg_query.upper() and "SET" in pg_query.upper():
+            # Extract SET clause
+            set_start = pg_query.upper().find("SET") + 3
+            where_start = pg_query.upper().find("WHERE") if "WHERE" in pg_query.upper() else len(pg_query)
+            if set_start > 3 and where_start > set_start:
+                set_clause = pg_query[set_start:where_start].strip()
+                # Parse the SET fields
+                field_assignments = [field.strip() for field in set_clause.split(',')]
+                parameter_idx = 0
+                for i, assignment in enumerate(field_assignments):
+                    if '=' in assignment:
+                        field_name = assignment.split('=')[0].strip()
+                        # Check if this is a boolean field
+                        if any(bool_name in field_name.lower() for bool_name in boolean_column_names):
+                            boolean_column_indices.append(parameter_idx)
+                            logger.debug(f"Identified boolean UPDATE column: {field_name} at parameter index {parameter_idx}")
+                    # Each assignment typically uses one parameter
+                    parameter_idx += 1
+                
+        # Log identified boolean columns
+        if boolean_column_indices:
+            logger.debug(f"Identified boolean columns at indices: {boolean_column_indices}")
         
         # Convert integer parameters to boolean values
         if isinstance(params, tuple) and boolean_column_indices:
             param_list = list(params)
             for idx in boolean_column_indices:
                 if idx < len(param_list):
-                    # Convert 0/1 to False/True
-                    if param_list[idx] == 0 or param_list[idx] == '0':
-                        param_list[idx] = False
-                        logger.debug(f"Converted parameter at index {idx} from 0 to False")
-                    elif param_list[idx] == 1 or param_list[idx] == '1':
-                        param_list[idx] = True
-                        logger.debug(f"Converted parameter at index {idx} from 1 to True")
+                    # Convert 0/1 to False/True - handle various formats
+                    try:
+                        if param_list[idx] == 0 or param_list[idx] == '0' or param_list[idx] is False:
+                            param_list[idx] = False
+                            logger.debug(f"Converted parameter at index {idx} from {params[idx]} to False")
+                        elif param_list[idx] == 1 or param_list[idx] == '1' or param_list[idx] is True:
+                            param_list[idx] = True
+                            logger.debug(f"Converted parameter at index {idx} from {params[idx]} to True")
+                    except Exception as e:
+                        logger.warning(f"Error converting boolean parameter at index {idx}: {e}")
             params = tuple(param_list)
         
         cursor = conn.cursor(cursor_factory=RealDictCursor)

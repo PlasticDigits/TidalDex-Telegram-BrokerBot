@@ -359,7 +359,7 @@ class WalletManager:
                 'private_key': wallet_dict.get('private_key', ''),
                 'derivation_path': wallet_derivation_path,
                 'is_active': False,
-                'imported': False,
+                'is_imported': False,
                 'created_at': time.time()
             }
             
@@ -433,7 +433,7 @@ class WalletManager:
                 'name': wallet_name,
                 'address': address,
                 'private_key': private_key,
-                'imported': True
+                'is_imported': True
             }
             
             # Save the wallet
@@ -453,7 +453,7 @@ class WalletManager:
             public_wallet_data: WalletData = {
                 'name': wallet_name,
                 'address': address,
-                'imported': True
+                'is_imported': True
             }
             
             return public_wallet_data

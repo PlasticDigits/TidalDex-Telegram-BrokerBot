@@ -182,8 +182,8 @@ def init_db() -> bool:
             private_key TEXT,
             path TEXT,
             name TEXT DEFAULT 'Default' NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            imported BOOLEAN DEFAULT FALSE,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_imported BOOLEAN DEFAULT FALSE,
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
@@ -266,8 +266,8 @@ def init_db() -> bool:
             private_key TEXT,
             path TEXT,
             name TEXT DEFAULT 'Default' NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            imported BOOLEAN DEFAULT FALSE,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_imported BOOLEAN DEFAULT FALSE,
             created_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
@@ -300,7 +300,7 @@ def init_db() -> bool:
             created_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
             UNIQUE(token_address, chain_id)
         );
-        
+
         -- User tracked tokens table for tracking which tokens a user wants to monitor
         CREATE TABLE IF NOT EXISTS user_tracked_tokens (
             id SERIAL PRIMARY KEY,

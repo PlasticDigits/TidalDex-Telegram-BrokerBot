@@ -24,7 +24,7 @@ class WalletData(TypedDict, total=False):
     derivation_path: Optional[str]
     path: Optional[str]  # Database field before conversion to derivation_path
     is_active: bool
-    imported: bool
+    is_imported: bool
     created_at: Optional[float]
     id: Optional[int]  # Database ID for the wallet
 
@@ -188,9 +188,9 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
                 fields.append("path = ?")
                 values.append(wallet_copy['derivation_path'])
                 
-            if 'imported' in wallet_copy:
-                fields.append("imported = ?")
-                values.append(1 if wallet_copy['imported'] else 0)
+            if 'is_imported' in wallet_copy:
+                fields.append("is_imported = ?")
+                values.append(1 if wallet_copy['is_imported'] else 0)
             
             if 'is_active' in wallet_copy:
                 fields.append("is_active = ?")
@@ -216,16 +216,16 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
             address: str = wallet_copy.get('address', '')
             private_key: Optional[str] = wallet_copy.get('private_key')
             derivation_path: Optional[str] = wallet_copy.get('derivation_path')
-            imported: bool = bool(wallet_copy.get('imported', False))
+            is_imported: bool = bool(wallet_copy.get('is_imported', False))
             
             # Insert new wallet
             execute_query(
                 """
                 INSERT INTO wallets 
-                (user_id, name, address, private_key, path, imported, created_at) 
+                (user_id, name, address, private_key, path, is_imported, created_at) 
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id_str, wallet_name, address, private_key, derivation_path, 1 if imported else 0, now)
+                (user_id_str, wallet_name, address, private_key, derivation_path, 1 if is_imported else 0, now)
             )
             
             logger.debug(f"New wallet {wallet_name} created for user {user_id_str}")
@@ -421,7 +421,7 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
         
         # Now get all wallets
         results: QueryResult = execute_query(
-            "SELECT id, name, address, path, imported, created_at FROM wallets WHERE user_id = ?",
+            "SELECT id, name, address, path, is_imported, created_at FROM wallets WHERE user_id = ?",
             (user_id_str,),
             fetch='all'
         )
