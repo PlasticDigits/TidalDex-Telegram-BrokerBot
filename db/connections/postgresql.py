@@ -248,54 +248,143 @@ def get_db_connection(db_name, db_user, db_password, db_host, db_port):
 @retry_on_db_error()
 def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_password=None, db_host=None, db_port=None):
     """
-    Execute a SQL query with retry on database errors.
+    Execute a SQL query and return the results.
     
     Args:
         query (str): SQL query to execute
-        params (tuple): Query parameters
-        fetch (str): One of 'all', 'one', or None for SELECT queries
-        db_name (str): Database name
-        db_user (str): Database user
-        db_password (str): Database password
-        db_host (str): Database host
-        db_port (int): Database port
+        params (tuple or dict, optional): Query parameters
+        fetch (str, optional): Fetch mode ('all', 'one', 'many', or None for execute only)
+        db_name (str, optional): Database name
+        db_user (str, optional): Database user
+        db_password (str, optional): Database password
+        db_host (str, optional): Database host
+        db_port (int, optional): Database port
         
     Returns:
-        list|dict|int: Query results or row count
+        QueryResult: Query results based on fetch mode
     """
     if not POSTGRESQL_AVAILABLE:
-        logger.error("psycopg2 is not installed. Please install it with 'pip install psycopg2-binary'")
-        return None
+        raise ImportError("psycopg2 is not installed. Please install it with 'pip install psycopg2-binary'")
+    
+    conn = None
+    try:
+        conn = get_connection(db_name, db_user, db_password, db_host, db_port)
+        if conn is None:
+            raise Exception("Failed to get PostgreSQL database connection")
         
-    with get_db_connection(db_name, db_user, db_password, db_host, db_port) as conn:
-        cursor = None
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute(query, params)
+        # Enhanced logging for debugging
+        logger.debug(f"Original query: {query}")
+        
+        # Convert SQLite-specific syntax to PostgreSQL
+        pg_query = query
+        
+        # Handle INSERT OR IGNORE syntax
+        if "INSERT OR IGNORE INTO" in pg_query.upper():
+            # Extract table name and the rest of the query
+            import re
+            match = re.match(r"INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)(.*)", pg_query, re.IGNORECASE)
+            if match:
+                table_name, rest_of_query = match.groups()
+                # Transform to PostgreSQL syntax
+                pg_query = f"INSERT INTO {table_name}{rest_of_query} ON CONFLICT DO NOTHING"
+                logger.debug(f"Transformed INSERT OR IGNORE to: {pg_query}")
+        
+        # Handle INSERT OR REPLACE/UPDATE syntax
+        elif "INSERT OR REPLACE INTO" in pg_query.upper():
+            # Extract table name, columns and values part
+            import re
+            match = re.match(r"INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)", pg_query, re.IGNORECASE)
+            if match:
+                table_name, columns, values = match.groups()
+                # Split columns for identifying the primary key (assuming first column is primary key)
+                column_list = [c.strip() for c in columns.split(',')]
+                primary_key = column_list[0]  # Typically user_id for this app
+                
+                # For the ON CONFLICT clause, we need to update all columns except the primary key
+                update_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in column_list if col != primary_key])
+                
+                # Transform to PostgreSQL syntax
+                pg_query = f"INSERT INTO {table_name} ({columns}) VALUES ({values}) ON CONFLICT ({primary_key}) DO UPDATE SET {update_clause}"
+                logger.debug(f"Transformed INSERT OR REPLACE to: {pg_query}")
+        
+        # Replace ? with %s for psycopg2 (it will handle the conversion to $1, $2 internally)
+        pg_query = pg_query.replace('?', '%s')
+        logger.debug(f"Modified query: {pg_query}")
+        
+        # Identify boolean columns and convert integer parameters (0/1) to boolean values
+        # Look for column names like "imported", "is_active", etc.
+        boolean_column_names = ["imported", "is_active", "active"]
+        boolean_column_indices = []
+        
+        # Identify boolean columns in the query
+        if "INSERT INTO" in pg_query.upper() and "(" in pg_query and ")" in pg_query:
+            # Extract column names from INSERT query
+            col_start = pg_query.find("(", pg_query.find("INSERT INTO")) + 1
+            col_end = pg_query.find(")", col_start)
+            if col_start > 0 and col_end > col_start:
+                column_list = [c.strip() for c in pg_query[col_start:col_end].split(',')]
+                # Find indices of boolean columns
+                for i, col in enumerate(column_list):
+                    if any(bool_name in col.lower() for bool_name in boolean_column_names):
+                        boolean_column_indices.append(i)
+                        logger.debug(f"Identified boolean column: {col} at index {i}")
+        
+        # Convert integer parameters to boolean values
+        if isinstance(params, tuple) and boolean_column_indices:
+            param_list = list(params)
+            for idx in boolean_column_indices:
+                if idx < len(param_list):
+                    # Convert 0/1 to False/True
+                    if param_list[idx] == 0 or param_list[idx] == '0':
+                        param_list[idx] = False
+                        logger.debug(f"Converted parameter at index {idx} from 0 to False")
+                    elif param_list[idx] == 1 or param_list[idx] == '1':
+                        param_list[idx] = True
+                        logger.debug(f"Converted parameter at index {idx} from 1 to True")
+            params = tuple(param_list)
+        
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Log parameters
+        logger.debug(f"Parameters (type {type(params).__name__}): {params}")
+        
+        # Execute the query
+        if not params:
+            logger.debug("Executing query without parameters")
+            cursor.execute(pg_query)
+        else:
+            logger.debug("Executing query with parameters")
+            cursor.execute(pg_query, params)
             
-            if fetch == 'all':
-                result = cursor.fetchall()
-                logger.debug(f"Query fetched {len(result)} rows")
-                return result
-            elif fetch == 'one':
-                row = cursor.fetchone()
-                return row
-            else:
-                conn.commit()
-                rows_affected = cursor.rowcount
-                logger.debug(f"Query affected {rows_affected} rows")
-                return rows_affected
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            logger.error(f"PostgreSQL database error executing query: {e}")
-            logger.error(f"Query: {query}")
-            logger.error(f"Params: {params}")
-            logger.error(traceback.format_exc())
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        conn.commit()
+        
+        result = None
+        if fetch == 'all':
+            result = cursor.fetchall()
+            logger.debug(f"Fetched all results: {len(result) if result else 0} rows")
+        elif fetch == 'one':
+            result = cursor.fetchone()
+            logger.debug(f"Fetched one result: {result is not None}")
+        elif fetch == 'many':
+            result = cursor.fetchmany()
+            logger.debug(f"Fetched many results: {len(result) if result else 0} rows")
+        else:
+            logger.debug(f"No fetch requested, rowcount: {cursor.rowcount}")
+        
+        cursor.close()
+        return result
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"PostgreSQL database error executing query: {e}")
+        logger.error(f"Query: {query}")
+        logger.error(f"Params: {params}")
+        logger.error(f"Param type: {type(params).__name__}")
+        logger.error(traceback.format_exc())
+        raise
+    finally:
+        if conn:
+            close_connection(conn)
 
 def test_connection(db_name, db_user, db_password, db_host, db_port):
     """
@@ -316,18 +405,18 @@ def test_connection(db_name, db_user, db_password, db_host, db_port):
         return False
         
     try:
-        result = execute_query(
-            "SELECT 1", 
-            fetch='one', 
-            db_name=db_name, 
-            db_user=db_user, 
-            db_password=db_password, 
-            db_host=db_host, 
-            db_port=db_port
-        )
-        return result is not None and '1' in result and result['1'] == 1
+        # Use a simpler approach to test the connection
+        with get_db_connection(db_name, db_user, db_password, db_host, db_port) as conn:
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 as test_value")
+                result = cursor.fetchone()
+                cursor.close()
+                return result is not None
+        return False
     except Exception as e:
         logger.error(f"PostgreSQL database connection test failed: {e}")
+        logger.error(traceback.format_exc())
         return False
 
 def init_db(db_name, db_user, db_password, db_host, db_port, init_script):
@@ -352,9 +441,23 @@ def init_db(db_name, db_user, db_password, db_host, db_port, init_script):
     with get_db_connection(db_name, db_user, db_password, db_host, db_port) as conn:
         try:
             cursor = conn.cursor()
-            cursor.execute(init_script)
-            conn.commit()
-            cursor.close()
+            
+            # Split the script into individual statements and execute them one by one
+            # This is important for handling dependencies between tables
+            statements = init_script.split(';')
+            
+            for statement in statements:
+                # Skip empty statements
+                statement = statement.strip()
+                if statement:
+                    try:
+                        cursor.execute(statement + ';')
+                        conn.commit()
+                    except Exception as e:
+                        # Log the error but continue with other statements
+                        logger.warning(f"Error executing statement: {e}")
+                        logger.warning(f"Statement: {statement}")
+                        conn.rollback()
             
             logger.info("PostgreSQL database initialized successfully")
             return True

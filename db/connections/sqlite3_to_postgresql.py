@@ -63,6 +63,80 @@ class SQLiteToPostgreSQLConverter:
         # Keep original for logging
         original_sql = sql
         
+        # Handle specific SQLite patterns like strftime('%s', 'now')
+        # Replace with appropriate PostgreSQL equivalents
+        sql = re.sub(
+            r"strftime\(\s*'%s'\s*,\s*'now'\s*\)",
+            "EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER",
+            sql,
+            flags=re.IGNORECASE
+        )
+        
+        # Handle SQLite's "INSERT OR IGNORE INTO" syntax (convert to PostgreSQL "ON CONFLICT DO NOTHING")
+        sql = re.sub(
+            r"INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*(\([^)]+\))?\s+VALUES",
+            r"INSERT INTO \1 \2 VALUES",
+            sql, 
+            flags=re.IGNORECASE
+        )
+        
+        # Add the ON CONFLICT clause for INSERT OR IGNORE statements 
+        if "INSERT INTO" in sql.upper() and "OR IGNORE" in sql.upper():
+            # Remove the OR IGNORE part
+            sql = sql.replace("OR IGNORE", "")
+            # Add ON CONFLICT DO NOTHING at the end if not already present
+            if "ON CONFLICT" not in sql.upper():
+                sql = sql.rstrip(';')
+                sql += " ON CONFLICT DO NOTHING;"
+        
+        # Convert SQLite parameter placeholders (?) to PostgreSQL placeholders ($1, $2, etc.)
+        # Use regex to ensure we only replace actual parameter placeholders, not ? in strings or comments
+        param_count = 1
+        processed_sql = ""
+        
+        # Process SQL one character at a time to handle ? placeholders safely
+        i = 0
+        in_string = False
+        string_char = None
+        
+        while i < len(sql):
+            char = sql[i]
+            
+            # Handle string literals
+            if char in ["'", '"'] and (i == 0 or sql[i-1] != '\\'):
+                if not in_string:
+                    in_string = True
+                    string_char = char
+                elif char == string_char:
+                    in_string = False
+                    string_char = None
+                processed_sql += char
+            elif char == '?' and not in_string:
+                # Replace ? with $N, but only if it's not in a string
+                processed_sql += f"${param_count}"
+                param_count += 1
+            else:
+                processed_sql += char
+            
+            i += 1
+        
+        sql = processed_sql
+        
+        # Handle SQLite ALTER TABLE statements differently for PostgreSQL
+        # PostgreSQL has different syntax for ALTER TABLE ADD CONSTRAINT
+        alter_table_match = re.search(
+            r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s+\(([^)]+)\)\s+REFERENCES\s+(\w+)\(([^)]+)\)(\s+ON\s+DELETE\s+CASCADE)?",
+            sql, 
+            re.IGNORECASE
+        )
+        if alter_table_match:
+            table, constraint, column, ref_table, ref_column, on_delete = alter_table_match.groups()
+            on_delete = on_delete or ""  # Use empty string if on_delete is None
+            # For PostgreSQL, it's better to use the ALTER TABLE ADD CONSTRAINT syntax
+            # directly rather than the SQLite-style syntax
+            sql = f"ALTER TABLE {table} ADD CONSTRAINT {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column}){on_delete};"
+            return sql
+        
         # Handle case conversion
         # SQLite is case-insensitive but PostgreSQL is case-sensitive for identifiers
         # This is a complex issue but we'll assume standard SQL casing conventions
@@ -86,8 +160,20 @@ class SQLiteToPostgreSQLConverter:
             sql += ' RETURNING id;'
         
         # Handle boolean literals (SQLite uses 0/1, PostgreSQL uses true/false)
-        sql = re.sub(r'(?<=\W)1(?=\W)', 'true', sql)
-        sql = re.sub(r'(?<=\W)0(?=\W)', 'false', sql)
+        # Only convert standalone 0/1 values, not those that might be used for integer columns
+        # For example, convert "WHERE active = 0" but not "DEFAULT 0" for integer columns
+        
+        # More selective boolean conversion - only convert in WHERE clauses and boolean contexts
+        # Look for patterns like "column = 0" or "column = 1" in WHERE clauses
+        if re.search(r'WHERE\s', sql, re.IGNORECASE):
+            # Convert 0/1 in WHERE clauses and boolean operators
+            # Look for patterns like "column = 0" or "column IS 1"
+            sql = re.sub(r'(\s*=\s*|\s+IS\s+)0(\s+|$|\))', r'\1false\2', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'(\s*=\s*|\s+IS\s+)1(\s+|$|\))', r'\1true\2', sql, flags=re.IGNORECASE)
+            
+            # Also handle boolean operators like AND, OR
+            sql = re.sub(r'(\s+AND\s+|\s+OR\s+|\s+NOT\s+)0(\s+|$|\))', r'\1false\2', sql, flags=re.IGNORECASE)
+            sql = re.sub(r'(\s+AND\s+|\s+OR\s+|\s+NOT\s+)1(\s+|$|\))', r'\1true\2', sql, flags=re.IGNORECASE)
         
         # Convert PRAGMA statements
         sql = SQLiteToPostgreSQLConverter._convert_pragma(sql)
@@ -95,14 +181,11 @@ class SQLiteToPostgreSQLConverter:
         # Handle LIMIT and OFFSET clauses
         sql = SQLiteToPostgreSQLConverter._convert_limit_offset(sql)
 
-        # handle create index
-        sql = SQLiteToPostgreSQLConverter.convert_create_index(sql)
-
-        # handle create table
-        sql = SQLiteToPostgreSQLConverter.convert_create_table(sql)
-
-        # handle insert
-        sql = SQLiteToPostgreSQLConverter.convert_insert(sql)
+        # IMPORTANT: Removing recursive calls that cause infinite recursion
+        # These statements below were causing recursion:
+        # sql = SQLiteToPostgreSQLConverter.convert_create_index(sql)
+        # sql = SQLiteToPostgreSQLConverter.convert_create_table(sql)
+        # sql = SQLiteToPostgreSQLConverter.convert_insert(sql)
         
         # Replace double-quoted identifiers with schema-qualified identifiers
         # This is complex and may need manual intervention in some cases
@@ -176,7 +259,16 @@ class SQLiteToPostgreSQLConverter:
             str: PostgreSQL compatible CREATE TABLE statement
         """
         # Special handling for CREATE TABLE statements
-        sql = SQLiteToPostgreSQLConverter.convert_sql(create_sql)
+        # Apply transformations directly instead of calling convert_sql to avoid recursion
+        sql = create_sql
+        
+        # Replace SQLite specific types with PostgreSQL types
+        for sqlite_type, pg_type in SQLiteToPostgreSQLConverter.TYPE_MAPPING.items():
+            pattern = re.compile(r'\b' + re.escape(sqlite_type) + r'\b', re.IGNORECASE)
+            sql = pattern.sub(pg_type, sql)
+            
+        # Convert AUTOINCREMENT to SERIAL if not already handled by type mapping
+        sql = re.sub(r'AUTOINCREMENT', 'SERIAL', sql, flags=re.IGNORECASE)
         
         # Handle IF NOT EXISTS syntax (supported in both but ensuring compatibility)
         if "IF NOT EXISTS" not in sql.upper():
@@ -213,7 +305,20 @@ class SQLiteToPostgreSQLConverter:
         # Convert WHERE clause syntax if needed
         # In most cases this should be compatible
         
-        return SQLiteToPostgreSQLConverter.convert_sql(sql)
+        # IMPORTANT: Instead of recursively calling convert_sql, we apply the 
+        # relevant transformations directly to avoid infinite recursion
+        
+        # Replace SQLite specific types with PostgreSQL types
+        for sqlite_type, pg_type in SQLiteToPostgreSQLConverter.TYPE_MAPPING.items():
+            pattern = re.compile(r'\b' + re.escape(sqlite_type) + r'\b', re.IGNORECASE)
+            sql = pattern.sub(pg_type, sql)
+            
+        # Convert SQLite functions to PostgreSQL equivalents
+        for sqlite_func, pg_func in SQLiteToPostgreSQLConverter.FUNCTION_MAPPING.items():
+            pattern = re.compile(r'\b' + re.escape(sqlite_func) + r'\b', re.IGNORECASE)
+            sql = pattern.sub(pg_func, sql)
+        
+        return sql
     
     @staticmethod
     def convert_insert(insert_sql: str) -> str:
@@ -226,7 +331,23 @@ class SQLiteToPostgreSQLConverter:
         Returns:
             str: PostgreSQL compatible INSERT statement
         """
-        sql = SQLiteToPostgreSQLConverter.convert_sql(insert_sql)
+        # Apply transformations directly instead of calling convert_sql to avoid recursion
+        sql = insert_sql
+        
+        # Replace SQLite specific types with PostgreSQL types
+        for sqlite_type, pg_type in SQLiteToPostgreSQLConverter.TYPE_MAPPING.items():
+            pattern = re.compile(r'\b' + re.escape(sqlite_type) + r'\b', re.IGNORECASE)
+            sql = pattern.sub(pg_type, sql)
+            
+        # Convert SQLite functions to PostgreSQL equivalents
+        for sqlite_func, pg_func in SQLiteToPostgreSQLConverter.FUNCTION_MAPPING.items():
+            pattern = re.compile(r'\b' + re.escape(sqlite_func) + r'\b', re.IGNORECASE)
+            sql = pattern.sub(pg_func, sql)
+        
+        # Handle RETURNING clause for INSERT statements if needed
+        if re.match(r'^\s*INSERT\s+INTO', sql, re.IGNORECASE) and 'RETURNING' not in sql.upper():
+            sql = sql.rstrip(';')
+            sql += ' RETURNING id;'
         
         # Handle SQLite's INSERT OR REPLACE/INSERT OR IGNORE syntax
         if re.match(r'^\s*INSERT\s+OR\s+REPLACE', sql, re.IGNORECASE):
@@ -248,7 +369,6 @@ class SQLiteToPostgreSQLConverter:
                     sql += ' ON CONFLICT (id) DO UPDATE SET '
                     # This is a simplistic approach - in practice you need to know all columns
                     sql += 'updated_at = EXCLUDED.updated_at;'
-                    logger.warning(f"Converted INSERT OR REPLACE to ON CONFLICT - may need manual adjustment")
             
         elif re.match(r'^\s*INSERT\s+OR\s+IGNORE', sql, re.IGNORECASE):
             sql = re.sub(
@@ -267,23 +387,39 @@ class SQLiteToPostgreSQLConverter:
     @staticmethod
     def adapt_params(params: Union[List[Any], Tuple[Any, ...], Dict[str, Any]]) -> Union[List[Any], Tuple[Any, ...], Dict[str, Any]]:
         """
-        Adapt SQLite parameters to PostgreSQL format if needed.
+        Adapt SQLite parameter values to PostgreSQL compatible values.
         
         Args:
-            params: Query parameters in SQLite format
+            params: Parameter collection (list, tuple, or dict)
             
         Returns:
-            Adapted parameters for PostgreSQL
+            Adapted parameter collection
         """
-        # In most cases, parameters are compatible
-        # This method exists to handle special cases if needed
-        return params
+        # If params is None or empty, return as is
+        if not params:
+            return params
+            
+        # For tuple/list parameters, convert to list for processing, then back to tuple
+        if isinstance(params, (list, tuple)):
+            # For PostgreSQL, parameters must be passed as a tuple (not a list)
+            # Make sure we return a tuple of values
+            return tuple(params)
+        
+        # For dict parameters, PostgreSQL uses keys like "%(key)s"
+        # but we've already converted to numbered params, so we can convert
+        # the dict to a tuple with the values in the right order
+        elif isinstance(params, dict):
+            # Extract values as a tuple in lexical key order for numbered parameters
+            return tuple(value for _, value in sorted(params.items()))
+            
+        # If params is a single value, wrap it in a tuple
+        return (params,)
 
 # Convenience functions
 
 def convert_sql(sql: str) -> str:
     """
-    Convert a SQLite SQL statement to PostgreSQL syntax.
+    Convenience function to convert a SQLite SQL statement to PostgreSQL syntax.
     
     Args:
         sql (str): SQLite SQL statement
@@ -295,7 +431,7 @@ def convert_sql(sql: str) -> str:
 
 def convert_create_table(sql: str) -> str:
     """
-    Convert a SQLite CREATE TABLE statement to PostgreSQL syntax.
+    Convenience function to convert a SQLite CREATE TABLE statement to PostgreSQL syntax.
     
     Args:
         sql (str): SQLite CREATE TABLE statement
@@ -307,7 +443,7 @@ def convert_create_table(sql: str) -> str:
 
 def convert_create_index(sql: str) -> str:
     """
-    Convert a SQLite CREATE INDEX statement to PostgreSQL syntax.
+    Convenience function to convert a SQLite CREATE INDEX statement to PostgreSQL syntax.
     
     Args:
         sql (str): SQLite CREATE INDEX statement
@@ -319,7 +455,7 @@ def convert_create_index(sql: str) -> str:
 
 def convert_insert(sql: str) -> str:
     """
-    Convert a SQLite INSERT statement to PostgreSQL syntax.
+    Convenience function to convert a SQLite INSERT statement to PostgreSQL syntax.
     
     Args:
         sql (str): SQLite INSERT statement
@@ -331,12 +467,12 @@ def convert_insert(sql: str) -> str:
 
 def adapt_params(params: Union[List[Any], Tuple[Any, ...], Dict[str, Any]]) -> Union[List[Any], Tuple[Any, ...], Dict[str, Any]]:
     """
-    Adapt SQLite parameters to PostgreSQL format if needed.
+    Adapt SQLite parameter values to PostgreSQL compatible values.
     
     Args:
-        params: Query parameters in SQLite format
+        params: Parameter collection (list, tuple, or dict)
         
     Returns:
-        Adapted parameters for PostgreSQL
+        Adapted parameter collection
     """
     return SQLiteToPostgreSQLConverter.adapt_params(params) 

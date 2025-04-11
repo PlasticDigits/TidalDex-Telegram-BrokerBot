@@ -137,7 +137,8 @@ def execute_query(query: str, params: Tuple[Any, ...] = (), fetch: Optional[str]
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return None
-        return cast(QueryResult, db_module.execute_query(convert_sql(query), adapt_params(params), fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
+        # Don't convert the query or params here - let the postgresql module handle it
+        return cast(QueryResult, db_module.execute_query(query, params, fetch, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT))
 
 def test_connection() -> bool:
     """
@@ -161,28 +162,19 @@ def init_db() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    # SQL script to initialize the database (same for both SQLite and PostgreSQL)
-    init_script: str = '''
-        -- Users table
+    # SQLite initialization script
+    sqlite_init_script: str = '''
+        -- Users table first (no foreign keys)
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             pin_hash TEXT,
             account_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             active_wallet_id INTEGER DEFAULT 0,
             mnemonic_index INTEGER DEFAULT 0,
-            settings TEXT,
-            FOREIGN KEY (active_wallet_id) REFERENCES wallets(id) ON DELETE SET NULL
+            settings TEXT
         );
         
-        -- Mnemonics table for seed phrases
-        CREATE TABLE IF NOT EXISTS mnemonics (
-            user_id TEXT PRIMARY KEY,
-            mnemonic TEXT NOT NULL,
-            created_at INTEGER DEFAULT (strftime('%s', 'now')),
-            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-        );
-        
-        -- Wallets table
+        -- Wallets table (referring to users)
         CREATE TABLE IF NOT EXISTS wallets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
@@ -195,6 +187,18 @@ def init_db() -> bool:
             created_at INTEGER DEFAULT (strftime('%s', 'now')),
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
+        );
+        
+        -- Add foreign key for active_wallet_id in users table (circular reference)
+        -- SQLite allows for adding this constraint later
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS active_wallet_id INTEGER REFERENCES wallets(id) ON DELETE SET NULL;
+        
+        -- Mnemonics table for seed phrases
+        CREATE TABLE IF NOT EXISTS mnemonics (
+            user_id TEXT PRIMARY KEY,
+            mnemonic TEXT NOT NULL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
         
         -- PIN attempts table for tracking failed attempts
@@ -241,14 +245,95 @@ def init_db() -> bool:
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
         );
     '''
+    
+    # PostgreSQL initialization script - customized for PostgreSQL syntax
+    postgres_init_script: str = '''
+        -- Users table first (no foreign keys)
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            pin_hash TEXT,
+            account_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            active_wallet_id INTEGER DEFAULT 0,
+            mnemonic_index INTEGER DEFAULT 0,
+            settings TEXT
+        );
+        
+        -- Wallets table (referring to users)
+        CREATE TABLE IF NOT EXISTS wallets (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            address TEXT NOT NULL,
+            private_key TEXT,
+            path TEXT,
+            name TEXT DEFAULT 'Default' NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            imported BOOLEAN DEFAULT FALSE,
+            created_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            UNIQUE(user_id, name)
+        );
+        
+        -- Mnemonics table for seed phrases
+        CREATE TABLE IF NOT EXISTS mnemonics (
+            user_id TEXT PRIMARY KEY,
+            mnemonic TEXT NOT NULL,
+            created_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        
+        -- PIN attempts table for tracking failed attempts
+        CREATE TABLE IF NOT EXISTS pin_attempts (
+            user_id TEXT PRIMARY KEY,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_attempt_time INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        
+        -- Tokens table for storing token information
+        CREATE TABLE IF NOT EXISTS tokens (
+            id SERIAL PRIMARY KEY,
+            token_address TEXT NOT NULL,
+            token_symbol TEXT,
+            token_name TEXT,
+            token_decimals INTEGER DEFAULT 18,
+            chain_id INTEGER DEFAULT 56,
+            created_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
+            UNIQUE(token_address, chain_id)
+        );
+        
+        -- User tracked tokens table for tracking which tokens a user wants to monitor
+        CREATE TABLE IF NOT EXISTS user_tracked_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token_id INTEGER NOT NULL,
+            tracked_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE,
+            UNIQUE(user_id, token_id)
+        );
+        
+        -- User balances table for storing historical token balances (append-only)
+        CREATE TABLE IF NOT EXISTS user_balances (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            token_id INTEGER NOT NULL,
+            balance TEXT NOT NULL,  -- Stored as string to handle large numbers
+            balance_usd REAL,       -- USD value at time of snapshot, if available
+            timestamp INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
+        );
+    '''
         
     if DB_TYPE == 'sqlite3':
-        return cast(bool, db_module.init_db(DB_PATH, init_script))
+        return cast(bool, db_module.init_db(DB_PATH, sqlite_init_script))
     else:  # postgresql
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return False
-        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, convert_sql(init_script)))
+        # For PostgreSQL, use the PostgreSQL-specific script
+        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, postgres_init_script))
 
 # Make functions from the underlying database module available
 retry_on_db_lock: Optional[Callable[[int, float], Callable[[F], F]]] = getattr(db_module, 'retry_on_db_lock', None) if DB_TYPE == 'sqlite3' else None

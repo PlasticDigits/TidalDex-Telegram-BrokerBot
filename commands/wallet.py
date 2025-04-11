@@ -92,10 +92,10 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text(
                     f"✅ Created a new wallet named '{new_wallet_name}'\n\n"
                     f"Address: `{new_wallet_address}`\n\n"
-                    "You can now use /send to send funds and /receive to view your address\.\n"
-                    "Use /swap to trade BNB or tokens\.\n"
-                    "Use /addwallet to create additional wallets.\n\n"
-                    "Important: Use /backup to save your recovery phrase\!",
+                    "You can now use /send to send funds and /receive to view your address\\.\n"
+                    "Use /swap to trade BNB or tokens\\.\n"
+                    "Use /addwallet to create additional wallets\\.\n\n"
+                    "Important: Use /backup to save your recovery phrase\\!",
                     parse_mode='MarkdownV2'
                 )
             elif update.message is not None:
