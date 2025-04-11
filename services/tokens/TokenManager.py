@@ -252,7 +252,7 @@ class TokenManager:
         if not wallet:
             logger.error(f"Wallet {wallet_name} not found for user {hash_user_id(user_id)}")
             return newly_tracked
-            
+        
         wallet_address = wallet['address']
 
         # update the default token list
@@ -465,10 +465,10 @@ class TokenManager:
             if token:
                 return TokenInfo(
                     token_address=token_address,
-                    symbol=token['token_symbol'],
-                    name=token['token_name'],
-                    decimals=token['token_decimals'],
-                    chain_id=token['chain_id']
+                    symbol=token.get('symbol') or token.get('token_symbol', ''),
+                    name=token.get('name') or token.get('token_name', ''),
+                    decimals=token.get('decimals') or token.get('token_decimals', 18),
+                    chain_id=token.get('chain_id', chain_id)
                 )
             
             # If not in database, try to get from blockchain
@@ -496,9 +496,9 @@ class TokenManager:
                     chain_id=chain_id
                 )
             except Exception as e:
-                logger.error(f"Failed to get token info from blockchain for {token_address}: {e}")
+                logger.error(f"Failed to get token info from blockchain for {token_address}: {str(e)}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Failed to get token info for {token_address}: {e}")
+            logger.error(f"Failed to get token info for {token_address}: {str(e)}")
             return None 

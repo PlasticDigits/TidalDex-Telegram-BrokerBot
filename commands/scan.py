@@ -25,6 +25,8 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error("Effective user is None in scan_command")
         return
     
+    logger.info(f"Scan command called by user {hash_user_id(user.id)}")
+    
     # Get the user ID as an integer (native type from Telegram)
     user_id_int: int = update.effective_user.id
     # For wallet manager, we need the user ID as a string
@@ -67,10 +69,12 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 logger.error(f"Failed to update status message: {e}")
         
         # Scan for tokens with status updates
+        logger.info(f"Scanning for tokens with status updates for user {hash_user_id(user_id_int)}")
         newly_tracked: Sequence[ChecksumAddress] = await token_manager.scan(
             user_id_str,
             status_callback=status_callback
         )
+        logger.info(f"Scanned {len(newly_tracked)} tokens for user {hash_user_id(user_id_int)}")
         
         if not newly_tracked:
             await status_message.edit_text(

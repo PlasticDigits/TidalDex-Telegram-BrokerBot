@@ -32,6 +32,7 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
     INSERT OR REPLACE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
     VALUES (?, ?, ?, ?, ?)
     """
+    
     execute_query(token_query, (token_address, symbol, name, decimals, chain_id))
 
     # Then, get the token_id
@@ -108,34 +109,30 @@ def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bo
 
 @retry_decorator(5, 0.1)
 def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dict[str, Any]]:
-    """Get token information by its address.
+    """Get token information by address.
     
     Args:
         token_address: The token address to look up
-        chain_id: The chain ID where the token exists (default: 56 for BSC)
+        chain_id: The chain ID to filter by (default: 56 for BSC)
         
     Returns:
         Optional[Dict[str, Any]]: Token information if found, None otherwise
     """
-    try:
-        query = """
-        SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id
-        FROM tokens
-        WHERE token_address = ? AND chain_id = ?
-        """
-        result = execute_query(query, (token_address, chain_id), fetch='one')
+    query = """
+    SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id
+    FROM tokens
+    WHERE token_address = ? AND chain_id = ?
+    """
+    result = execute_query(query, (token_address, chain_id), fetch='one')
+    
+    if not result or result == -1:
+        return None
         
-        if not result:
-            return None
-            
-        return {
-            'id': result['id'],
-            'token_address': result['token_address'],
-            'token_symbol': result['token_symbol'],
-            'token_name': result['token_name'],
-            'token_decimals': result['token_decimals'],
-            'chain_id': result['chain_id']
-        }
-    except Exception as e:
-        logger.error(f"Failed to get token by address {token_address}: {str(e)}")
-        return None 
+    return {
+        'id': result['id'],
+        'token_address': result['token_address'],
+        'symbol': result['token_symbol'],
+        'name': result['token_name'],
+        'decimals': result['token_decimals'],
+        'chain_id': result['chain_id']
+    } 

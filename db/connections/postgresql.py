@@ -272,30 +272,40 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
         if conn is None:
             raise Exception("Failed to get PostgreSQL database connection")
         
-        # Enhanced logging for debugging
-        logger.debug(f"Original query: {query}")
-        
         # Convert SQLite-specific syntax to PostgreSQL
         pg_query = query
         
         # Handle INSERT OR IGNORE syntax
         if "INSERT OR IGNORE INTO" in pg_query.upper():
             # Extract table name and the rest of the query
-            import re
-            match = re.match(r"INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)(.*)", pg_query, re.IGNORECASE)
-            if match:
-                table_name, rest_of_query = match.groups()
-                # Transform to PostgreSQL syntax
-                pg_query = f"INSERT INTO {table_name}{rest_of_query} ON CONFLICT DO NOTHING"
-                logger.debug(f"Transformed INSERT OR IGNORE to: {pg_query}")
+            parts = pg_query.split("VALUES")
+            if len(parts) == 2:
+                # Get table and columns from first part
+                table_part = parts[0].replace("INSERT OR IGNORE INTO", "INSERT INTO").strip()
+                # Build the transformed query
+                pg_query = f"{table_part} VALUES {parts[1].strip()} ON CONFLICT DO NOTHING"
+            else:
+                # If the query structure is not as expected, try a regex approach
+                import re
+                match = re.match(r"INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)(.*)", pg_query, re.IGNORECASE)
+                if match:
+                    table_name, rest_of_query = match.groups()
+                    # Transform to PostgreSQL syntax
+                    pg_query = f"INSERT INTO {table_name}{rest_of_query} ON CONFLICT DO NOTHING"
         
         # Handle INSERT OR REPLACE/UPDATE syntax
-        elif "INSERT OR REPLACE INTO" in pg_query.upper():
-            # Extract table name, columns and values part
-            import re
-            match = re.match(r"INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)", pg_query, re.IGNORECASE)
-            if match:
-                table_name, columns, values = match.groups()
+        if "INSERT OR REPLACE INTO" in pg_query.upper():
+            # Split the query into parts
+            parts = pg_query.split("VALUES")
+            if len(parts) == 2:
+                # Get table and columns from first part
+                table_part = parts[0].replace("INSERT OR REPLACE INTO", "").strip()
+                table_name = table_part.split("(")[0].strip()
+                columns = table_part.split("(")[1].split(")")[0].strip()
+                
+                # Get values from second part
+                values = parts[1].strip().strip("()")
+                
                 # Split columns for identifying the primary key (assuming first column is primary key)
                 column_list = [c.strip() for c in columns.split(',')]
                 primary_key = column_list[0]  # Typically user_id for this app
@@ -303,9 +313,25 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
                 # For the ON CONFLICT clause, we need to update all columns except the primary key
                 update_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in column_list if col != primary_key])
                 
+                # First ensure the unique constraint exists
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(f"""
+                        DO $$ 
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint 
+                                WHERE conname = '{table_name}_{primary_key}_key'
+                            ) THEN
+                                ALTER TABLE {table_name} ADD CONSTRAINT {table_name}_{primary_key}_key UNIQUE ({primary_key});
+                            END IF;
+                        END $$;
+                    """)
+                except Exception as e:
+                    logger.warning(f"Could not add unique constraint: {e}")
+                
                 # Transform to PostgreSQL syntax
                 pg_query = f"INSERT INTO {table_name} ({columns}) VALUES ({values}) ON CONFLICT ({primary_key}) DO UPDATE SET {update_clause}"
-                logger.debug(f"Transformed INSERT OR REPLACE to: {pg_query}")
         
         # Replace ? with %s for psycopg2 (it will handle the conversion to $1, $2 internally)
         pg_query = pg_query.replace('?', '%s')
@@ -372,6 +398,8 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
             logger.debug(f"No fetch requested, rowcount: {cursor.rowcount}")
         
         cursor.close()
+        if result is None:
+            return -1 # compatibility with sqlite3
         return result
     except Exception as e:
         if conn:

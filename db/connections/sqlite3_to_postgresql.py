@@ -63,34 +63,33 @@ class SQLiteToPostgreSQLConverter:
         # Keep original for logging
         original_sql = sql
         
-        # Handle specific SQLite patterns like strftime('%s', 'now')
-        # Replace with appropriate PostgreSQL equivalents
-        sql = re.sub(
-            r"strftime\(\s*'%s'\s*,\s*'now'\s*\)",
-            "EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER",
-            sql,
-            flags=re.IGNORECASE
-        )
+        # Handle SQLite's "INSERT OR REPLACE" syntax (convert to PostgreSQL "ON CONFLICT DO UPDATE")
+        if "INSERT OR REPLACE" in sql.upper():
+            # Remove the OR REPLACE part
+            sql = sql.replace("OR REPLACE", "")
+            # Extract table name
+            table_match = re.search(r'INTO\s+([^\s(]+)', sql, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1)
+                # Add ON CONFLICT clause for UPSERT
+                if 'ON CONFLICT' not in sql.upper():
+                    sql = sql.rstrip(';')
+                    sql += f" ON CONFLICT (token_address, chain_id) DO UPDATE SET "
+                    # Update all columns except the primary key
+                    sql += "token_symbol = EXCLUDED.token_symbol, "
+                    sql += "token_name = EXCLUDED.token_name, "
+                    sql += "token_decimals = EXCLUDED.token_decimals;"
         
-        # Handle SQLite's "INSERT OR IGNORE INTO" syntax (convert to PostgreSQL "ON CONFLICT DO NOTHING")
-        sql = re.sub(
-            r"INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*(\([^)]+\))?\s+VALUES",
-            r"INSERT INTO \1 \2 VALUES",
-            sql, 
-            flags=re.IGNORECASE
-        )
-        
-        # Add the ON CONFLICT clause for INSERT OR IGNORE statements 
-        if "INSERT INTO" in sql.upper() and "OR IGNORE" in sql.upper():
+        # Handle SQLite's "INSERT OR IGNORE" syntax (convert to PostgreSQL "ON CONFLICT DO NOTHING")
+        elif "INSERT OR IGNORE" in sql.upper():
             # Remove the OR IGNORE part
             sql = sql.replace("OR IGNORE", "")
-            # Add ON CONFLICT DO NOTHING at the end if not already present
-            if "ON CONFLICT" not in sql.upper():
+            # Add ON CONFLICT DO NOTHING
+            if 'ON CONFLICT' not in sql.upper():
                 sql = sql.rstrip(';')
                 sql += " ON CONFLICT DO NOTHING;"
         
         # Convert SQLite parameter placeholders (?) to PostgreSQL placeholders ($1, $2, etc.)
-        # Use regex to ensure we only replace actual parameter placeholders, not ? in strings or comments
         param_count = 1
         processed_sql = ""
         
