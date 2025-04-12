@@ -190,6 +190,9 @@ class SwapManager:
             if status_callback:
                 await status_callback("Checking token allowance...")
             
+            # initialize allowance to 0
+            allowance = 0
+
             # Check allowance if not BNB
             if from_token_address != "BNB":
                 token_contract = self.w3.eth.contract(
