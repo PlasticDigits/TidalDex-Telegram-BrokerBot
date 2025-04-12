@@ -79,8 +79,12 @@ async def process_token_address(update: Update, context: ContextTypes.DEFAULT_TY
     # Remove any whitespace
     token_address = token_address.strip() if token_address else ""
     
+    logger.info(f"Processing for tracking token: {token_address} for user {hash_user_id(user_id)}")
+    
     # Get token info
     token_info: Optional[Dict[str, Any]] = await get_token_info(token_address)
+
+    logger.info(f"Found token to track with symbol: {token_info.get('symbol')} and name: {token_info.get('name')} for user {hash_user_id(user_id)}")
     
     if not token_info:
         await message.reply_text(
@@ -209,7 +213,7 @@ track_conv_handler: ConversationHandler[ContextTypes.DEFAULT_TYPE] = Conversatio
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
         ],
         TOKEN_INPUT: [
-            CallbackQueryHandler(process_token_address)
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_token_address)
         ],
         TOKEN_CONFIRMATION: [
             CallbackQueryHandler(process_tracking_confirmation, pattern=r"^(confirm|cancel)_track$")
