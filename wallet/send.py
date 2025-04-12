@@ -10,6 +10,10 @@ from utils.gas_estimation import estimate_bnb_transfer_gas, estimate_token_trans
 from web3.types import Wei
 import time
 from utils.config import BSC_SCANNER_URL
+import logging
+
+logger = logging.getLogger(__name__)
+
 async def send_bnb(
     from_private_key: str, 
     to_address: str, 
@@ -405,6 +409,9 @@ async def send_contract_call(
     # Build transaction
     if status_callback:
         await status_callback("Building transaction...")
+
+    if value_wei > 0:
+        logger.info(f"Sending {value_wei} BNB with transaction")
     
     tx = contract_function.build_transaction({
         'from': checksum_from_address,
@@ -412,7 +419,7 @@ async def send_contract_call(
         'gas': int(gas_info['gas_estimate']),
         'gasPrice': Wei(int(gas_info['gas_price'])),
         'chainId': w3.eth.chain_id,
-        'value': value_wei
+        'value': Wei(value_wei)
     })
     
     # Sign transaction
