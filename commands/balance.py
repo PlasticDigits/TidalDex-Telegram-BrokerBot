@@ -10,7 +10,7 @@ from services.pin import pin_manager
 from services import token_manager
 import logging
 from db.wallet import WalletData
-from web3 import Web3
+from utils.web3_connection import w3
 import traceback
 import httpx
 from utils.config import BSC_RPC_URL
@@ -56,8 +56,6 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     token_balances: Dict[str, Any] = {}  # Initialize token_balances as empty dict
     
     try:
-        # Connect to BSC
-        w3: Web3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
         
         # Get BNB balance
         balance_wei: int = await get_wallet_balance(wallet_address, "BNB")

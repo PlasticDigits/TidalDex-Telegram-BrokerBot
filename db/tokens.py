@@ -4,7 +4,7 @@ Provides functions to interact with the tokens, user_tracked_tokens, and user_ba
 """
 import logging
 from typing import List, Dict, Any, Optional, TypedDict, Awaitable, cast
-from web3 import Web3
+from utils.web3_connection import w3
 from db.connection import execute_query, retry_decorator
 from db.utils import hash_user_id
 # Configure module logger

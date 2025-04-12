@@ -36,7 +36,7 @@ from db.mnemonic import get_user_mnemonic, save_user_mnemonic, get_user_mnemonic
 from wallet.mnemonic import derive_wallet_from_mnemonic
 from wallet.send import send_bnb, send_token
 from wallet.balance import get_bnb_balance, get_token_balance
-from web3 import Web3
+from utils.web3_connection import w3
 from utils.config import BSC_RPC_URL
 from decimal import Decimal
 from db.utils import hash_user_id
@@ -62,7 +62,7 @@ class WalletManager:
     
     def _initialize(self) -> None:
         """Initialize the wallet manager."""
-        self.w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
+        self.w3 = w3
         logger.info("WalletManager initialized")
 
     async def send_bnb(self, user_id: str, recipient: str, amount_wei: int, pin: Optional[str] = None, status_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:

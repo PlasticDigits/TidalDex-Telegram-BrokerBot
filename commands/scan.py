@@ -5,7 +5,7 @@ import logging
 from telegram import Update, User, Message
 from telegram.ext import ContextTypes, CommandHandler
 from typing import Optional, List, Dict, Any, Union, Callable, cast, Sequence, Coroutine
-from web3 import Web3
+from utils.web3_connection import w3
 from web3.types import ChecksumAddress # type: ignore[attr-defined]
 
 from services import token_manager

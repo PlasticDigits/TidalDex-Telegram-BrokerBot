@@ -4,7 +4,7 @@ Utility functions for working with tokens on the blockchain.
 import logging
 import json
 import os
-from web3 import Web3
+from utils.web3_connection import w3
 from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 import httpx
 from utils.config import BSC_RPC_URL, DEFAULT_TOKEN_LIST
@@ -13,9 +13,6 @@ from typing import Dict, Union, Any, Optional
 
 # Configure module logger
 logger = logging.getLogger(__name__)
-
-# Initialize Web3 connection
-w3 = Web3(Web3.HTTPProvider(BSC_RPC_URL))
 
 # Token cache for faster lookups
 _token_cache: Dict[str, Dict[str, Union[str, int]]] = {}
@@ -32,11 +29,11 @@ async def validate_token_address(token_address: str) -> bool:
     Returns:
         bool: True if valid token, False otherwise
     """
-    if not Web3.is_address(token_address):
+    if not w3.is_address(token_address):
         return False
         
     # Convert to checksum address
-    token_address = Web3.to_checksum_address(token_address)
+    token_address = w3.to_checksum_address(token_address)
     
     try:
         # Create contract instance
@@ -65,11 +62,11 @@ async def get_token_info(token_address: str) -> Optional[Dict[str, Any]]:
         dict: Token information with keys 'symbol', 'name', 'decimals'
         None: If token information cannot be retrieved
     """
-    if not Web3.is_address(token_address):
+    if not w3.is_address(token_address):
         return None
         
     # Convert to checksum address
-    token_address = Web3.to_checksum_address(token_address)
+    token_address = w3.to_checksum_address(token_address)
 
     httpxClient = httpx.AsyncClient()
     
@@ -141,12 +138,12 @@ async def get_token_balance(wallet_address: str, token_address: str) -> int:
     Returns:
         int: Raw token balance (without decimal adjustment)
     """
-    if not Web3.is_address(wallet_address) or not Web3.is_address(token_address):
+    if not w3.is_address(wallet_address) or not w3.is_address(token_address):
         return 0
         
     # Convert to checksum addresses
-    wallet_address = Web3.to_checksum_address(wallet_address)
-    token_address = Web3.to_checksum_address(token_address)
+    wallet_address = w3.to_checksum_address(wallet_address)
+    token_address = w3.to_checksum_address(token_address)
     
     try:
         # Create contract instance

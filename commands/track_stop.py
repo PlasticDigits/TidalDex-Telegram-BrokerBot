@@ -5,7 +5,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, User, Message
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from typing import List, Dict, Any, Optional, Union, Callable, cast
-from web3 import Web3
+from utils.web3_connection import w3
 from db.utils import hash_user_id
 from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
@@ -187,12 +187,12 @@ async def track_stop_command_web3(update: Update, context: ContextTypes.DEFAULT_
     token_address = token_address.strip()
     
     # Validate the token address
-    if not Web3.is_address(token_address):
+    if not w3.is_address(token_address):
         await web3_message.reply_text("Invalid token address. Please try again.")
         return ConversationHandler.END
         
     # Convert to checksum address
-    token_address = Web3.to_checksum_address(token_address)
+    token_address = w3.to_checksum_address(token_address)
     
     # Stop tracking the token
     try:

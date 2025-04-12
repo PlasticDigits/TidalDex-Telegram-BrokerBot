@@ -7,7 +7,6 @@ import json
 import httpx
 import asyncio
 from typing import Dict, List, Optional, Any, TypedDict, cast, Union, Awaitable, Callable
-from web3 import Web3
 from web3.contract import Contract
 from web3.exceptions import ContractLogicError
 from web3.types import Address, ChecksumAddress, ENS # type: ignore[attr-defined]
@@ -144,7 +143,7 @@ class TokenManager:
                 
             for token in token_list['tokens']:
                 try:
-                    address = Web3.to_checksum_address(token['address'])
+                    address = w3.to_checksum_address(token['address'])
                     default_tokens[address] = TokenDetails(
                         symbol=token['symbol'],
                         name=token['name'],
@@ -171,7 +170,7 @@ class TokenManager:
             bool: True if token was successfully tracked, False otherwise
         """
         try:
-            token_address = Web3.to_checksum_address(token_address)
+            token_address = w3.to_checksum_address(token_address)
             
             if is_token_tracked(user_id, token_address, chain_id):
                 logger.info(f"Token {token_address} is already being tracked for user {hash_user_id(user_id)}")
@@ -215,7 +214,7 @@ class TokenManager:
             bool: True if token was successfully untracked, False otherwise
         """
         try:
-            token_address = Web3.to_checksum_address(token_address)
+            token_address = w3.to_checksum_address(token_address)
             await untrack_token(user_id, token_address, chain_id)
             logger.info(f"Stopped tracking token {token_address} for user {hash_user_id(user_id)}")
             return True
@@ -340,7 +339,7 @@ class TokenManager:
         for token in tokens:
             try:
                 # Convert token address to checksum address
-                token_address = Web3.to_checksum_address(token["token_address"])
+                token_address = w3.to_checksum_address(token["token_address"])
                 
                 # Get balance using the contract's balanceOf function
                 raw_balance = await get_token_balance(wallet_address, token_address)
@@ -423,7 +422,7 @@ class TokenManager:
             int: Raw Balance of the token for the wallet
         """
         try:
-            token_address = Web3.to_checksum_address(token_address)
+            token_address = w3.to_checksum_address(token_address)
             return get_token_balance(wallet_address, token_address)
         except Exception as e:
             logger.error(f"Failed to get token balance for {token_address} for wallet {wallet_address}: {str(e)}")
@@ -441,7 +440,7 @@ class TokenManager:
             bool: True if the token is being tracked, False otherwise
         """
         try:
-            token_address = Web3.to_checksum_address(token_address)
+            token_address = w3.to_checksum_address(token_address)
             return is_token_tracked(user_id, token_address, chain_id)
         except Exception as e:
             logger.error(f"Failed to check if token {token_address} is tracked for user {hash_user_id(user_id)}: {str(e)}")
@@ -458,7 +457,7 @@ class TokenManager:
             Optional[TokenInfo]: Token information if found, None otherwise
         """
         try:
-            token_address = Web3.to_checksum_address(token_address)
+            token_address = w3.to_checksum_address(token_address)
             
             # First try to get token info from database
             token = get_token_by_address(token_address)

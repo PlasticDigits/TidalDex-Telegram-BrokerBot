@@ -9,7 +9,7 @@ from utils.gas_estimation import estimate_bnb_transfer_gas, estimate_token_trans
 from services.pin import require_pin, pin_manager
 import logging
 from db.wallet import WalletData
-from web3 import Web3 as w3
+from utils.web3_connection import w3
 from decimal import Decimal
 from utils.config import BSC_SCANNER_URL
 from wallet.send import send_token, send_bnb

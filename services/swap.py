@@ -1,5 +1,4 @@
 from typing import Dict, Optional, Any, List, Callable, Awaitable
-from web3 import Web3
 from web3.types import ChecksumAddress, Wei
 import logging
 from decimal import Decimal
