@@ -98,7 +98,7 @@ async def process_token_address(update: Update, context: ContextTypes.DEFAULT_TY
     decimals: int = token_info.get('decimals', 18)
     
     # Check if token is already being tracked
-    is_tracked: bool = await token_manager.is_token_tracked(str(user_id), token_address)
+    is_tracked: bool = token_manager.is_token_tracked(str(user_id), token_address)
     
     if is_tracked:
         await message.reply_text(
