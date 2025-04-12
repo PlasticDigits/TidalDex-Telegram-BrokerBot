@@ -160,7 +160,8 @@ async def estimate_contract_call_gas(
     contract_abi: List[Dict[str, Any]],
     function_name: str,
     function_args: List[Any],
-    status_callback: Optional[Callable[[str], Awaitable[None]]] = None
+    status_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    value_wei: int = 0
 ) -> Dict[str, Union[int, float]]:
     """
     Estimate gas for a contract call.
@@ -179,7 +180,7 @@ async def estimate_contract_call_gas(
     function_call = contract.functions[function_name](*function_args)
     
     # Estimate gas
-    gas_estimate = function_call.estimate_gas({'from': from_checksum})
+    gas_estimate = function_call.estimate_gas({'from': from_checksum, 'value': value_wei})
     
     # Get gas price
     gas_price = w3.eth.gas_price
@@ -191,9 +192,7 @@ async def estimate_contract_call_gas(
     gas_cost_bnb = w3.from_wei(gas_cost_wei, 'ether')
     
     if status_callback:
-        await status_callback(f"Gas estimate: {gas_estimate} units")
-        await status_callback(f"Gas price: {w3.from_wei(gas_price, 'gwei')} Gwei")
-        await status_callback(f"Total gas cost: {gas_cost_bnb} BNB")
+        await status_callback(f"Total gas cost: {gas_cost_bnb} BNB\nGas price: {w3.from_wei(gas_price, 'gwei')} Gwei")
         
     return {
         'gas_wei': gas_cost_wei,

@@ -351,30 +351,20 @@ async def send_contract_call(
     Returns:
         Dict containing transaction hash, status, and block number
     """
-    if status_callback:
-        await status_callback("Deriving sender address from private key...")
     
     account = Account.from_key(from_private_key)
     from_address = account.address
     
-    if status_callback:
-        await status_callback("Converting addresses to checksum format...")
-    
     checksum_from_address = w3.to_checksum_address(from_address)
     checksum_to_contract_address = w3.to_checksum_address(to_contract_address)
     
-    if status_callback:
-        await status_callback("Loading contract...")
-    
     contract = w3.eth.contract(address=checksum_to_contract_address, abi=contract_abi)
     
-    # Get the contract function
-    if status_callback:
-        await status_callback(f"Preparing to call function: {function_name}...")
-    
     contract_function = contract.functions[function_name](*function_args)
+
     
     # Estimate gas
+    logger.info(f"Estimating gas for contract call: {function_name} with args: {function_args} and value: {value_wei}")
     if status_callback:
         await status_callback("Estimating gas...")
     
@@ -384,7 +374,8 @@ async def send_contract_call(
         contract_abi,
         function_name,
         function_args,
-        status_callback
+        status_callback,
+        value_wei
     )
     
     # Check if we have enough BNB for gas and value
@@ -410,6 +401,7 @@ async def send_contract_call(
     if status_callback:
         await status_callback("Building transaction...")
 
+    logger.info(f"Building transaction with value: {value_wei}")
     if value_wei > 0:
         logger.info(f"Sending {value_wei} BNB with transaction")
     
