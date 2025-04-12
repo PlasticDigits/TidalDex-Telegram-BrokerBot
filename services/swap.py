@@ -253,13 +253,6 @@ class SwapManager:
                 swap_function_name = 'swapExactETHForTokensSupportingFeeOnTransferTokens'
                 swap_args = [amount_out_min, path, wallet_address, deadline]
                 value_wei = amount_in
-                logger.info(f"BNB Swap Details:")
-                logger.info(f"Function: {swap_function_name}")
-                logger.info(f"Amount in (wei): {amount_in}")
-                logger.info(f"Amount out min: {amount_out_min}")
-                logger.info(f"Path: {path}")
-                logger.info(f"Value wei: {value_wei}")
-                logger.info(f"Deadline: {deadline}")
             else:
                 swap_function_name = 'swapExactTokensForTokensSupportingFeeOnTransferTokens'
                 swap_args = [amount_in, amount_out_min, path, wallet_address, deadline]

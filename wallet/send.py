@@ -401,9 +401,6 @@ async def send_contract_call(
     if status_callback:
         await status_callback("Building transaction...")
 
-    logger.info(f"Building transaction with value: {value_wei}")
-    if value_wei > 0:
-        logger.info(f"Sending {value_wei} BNB with transaction")
     
     tx = contract_function.build_transaction({
         'from': checksum_from_address,
