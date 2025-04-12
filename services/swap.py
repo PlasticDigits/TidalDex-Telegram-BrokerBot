@@ -247,11 +247,14 @@ class SwapManager:
             value_wei = 0
             if to_token_address == "BNB":
                 swap_function_name = 'swapExactTokensForETHSupportingFeeOnTransferTokens'
+                swap_args = [amount_in, amount_out_min, path, wallet_address, deadline]
             elif from_token_address == "BNB":
                 swap_function_name = 'swapExactETHForTokensSupportingFeeOnTransferTokens'
+                swap_args = [amount_out_min, path, wallet_address, deadline]
                 value_wei = amount_in
             else:
                 swap_function_name = 'swapExactTokensForTokensSupportingFeeOnTransferTokens'
+                swap_args = [amount_in, amount_out_min, path, wallet_address, deadline]
 
             # Execute swap using send_contract_call
             swap_result = await send_contract_call(
@@ -259,7 +262,7 @@ class SwapManager:
                 self.router_address,
                 self.router_abi,
                 swap_function_name,
-                [amount_in, amount_out_min, path, wallet_address, deadline],
+                swap_args,
                 status_callback,
                 value_wei
             )
