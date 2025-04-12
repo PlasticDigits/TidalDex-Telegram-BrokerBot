@@ -15,4 +15,4 @@ Pillow==10.4.0  # Required by qrcode for image generation
 httpx==0.28.1
 mypy==1.15.0
 # Optional dependencies
-# psycopg2-binary==2.9.9  # Uncomment for PostgreSQL support (required if DB_TYPE=postgresql)
+psycopg2-binary==2.9.9  # Uncomment for PostgreSQL support (required if DB_TYPE=postgresql)
