@@ -133,6 +133,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 
                 balance_msg_text.append("\nUse /send to transfer funds.")
                 balance_msg_text.append("Use /swap to trade BNB or tokens.")
+                balance_msg_text.append("Use /scan to find other tokens in your wallet")
                 
                 await message.reply_text(
                     "\n".join(balance_msg_text),
