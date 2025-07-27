@@ -101,6 +101,20 @@ def save_x_account_connection(
                  encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time)
             )
         
+        # Add immediate verification to debug the issue
+        if result is not None:
+            # Verify the record was actually saved
+            verification = execute_query(
+                "SELECT user_id, x_username FROM x_accounts WHERE user_id = ?",
+                (user_id_str,),
+                fetch='one'
+            )
+            if verification:
+                logger.info(f"✅ Verification successful - X account record exists for user {user_id_str} with username @{verification.get('x_username')}")
+            else:
+                logger.error(f"❌ Verification FAILED - X account record NOT found immediately after save for user {user_id_str}")
+                return False
+        
         return result is not None
         
     except Exception as e:
