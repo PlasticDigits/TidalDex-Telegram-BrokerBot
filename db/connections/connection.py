@@ -58,6 +58,10 @@ except ImportError as e:
     logger.error(f"Error importing database module: {e}")
     logger.error("Falling back to SQLite")
     DB_TYPE = 'sqlite3'
+    if not os.path.isabs(DB_NAME):
+        DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data', DB_NAME)
+    else:
+        DB_PATH = DB_NAME
     db_module = import_module('db.connections.sqlite3')
 
 def create_connection() -> Optional[DBConnection]:

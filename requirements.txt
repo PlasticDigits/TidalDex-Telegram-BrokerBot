@@ -10,9 +10,8 @@ mnemonic==0.21
 eth-utils==5.2.0
 qrcode==7.4.2
 types-qrcode==7.4.0.20240921
-mnemonic==0.21
 Pillow==10.4.0  # Required by qrcode for image generation
 httpx==0.28.1
 mypy==1.15.0
 fastapi==0.116.1
-psycopg2-binary==2.9.9
+psycopg2==2.9.9
