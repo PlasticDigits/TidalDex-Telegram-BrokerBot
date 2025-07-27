@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 
 from utils.config import API_HOST, API_PORT, X_CLIENT_ID, X_CLIENT_SECRET, X_REDIRECT_URI, X_SCOPES
 from requests_oauth2client import OAuth2Client, OAuth2AuthorizationCodeAuth
+from db.utils import hash_user_id
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -208,13 +209,14 @@ async def x_oauth_callback(
             status_code=500
         )
 
-def create_oauth_state(user_id: int, telegram_chat_id: int) -> str:
+def create_oauth_state(user_id: int, telegram_chat_id: int, pin: Optional[str] = None) -> str:
     """
     Create a new OAuth state for a user.
     
     Args:
         user_id: Telegram user ID
         telegram_chat_id: Telegram chat ID
+        pin: User's PIN for encryption (optional)
         
     Returns:
         Generated state string
@@ -223,6 +225,7 @@ def create_oauth_state(user_id: int, telegram_chat_id: int) -> str:
     oauth_states[state] = {
         'user_id': user_id,
         'telegram_chat_id': telegram_chat_id,
+        'pin': pin,
         'created_at': time.time(),
         'status': 'pending'
     }
@@ -236,7 +239,7 @@ def create_oauth_state(user_id: int, telegram_chat_id: int) -> str:
     for expired_state in expired_states:
         oauth_states.pop(expired_state, None)
     
-    logger.info(f"Created OAuth state {state} for user {user_id}")
+    logger.info(f"Created OAuth state {state} for user {hash_user_id(user_id)}")
     return state
 
 def get_oauth_state_data(state: str) -> Optional[Dict[str, Any]]:

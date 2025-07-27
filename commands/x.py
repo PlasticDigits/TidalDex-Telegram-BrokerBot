@@ -20,6 +20,7 @@ from db import (
     delete_x_account_connection, has_x_account_connection,
     cleanup_corrupted_x_account,
 )
+from db.utils import hash_user_id
 from requests_oauth2client import OAuth2Client
 import httpx
 
@@ -113,7 +114,7 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         return CHOOSING_X_ACTION
         
     except Exception as e:
-        logger.error(f"Error in x_command for user {user_id}: {e}")
+        logger.error(f"Error in x_command for user {hash_user_id(user_id)}: {e}")
         await update.message.reply_html(
             "❌ An error occurred while processing your request. Please try again."
         )
@@ -192,9 +193,9 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         # Check if user has an existing X connection with detailed logging
-        logger.info(f"Checking X account connection for user {user_id}")
+        logger.info(f"Checking X account connection for user {hash_user_id(user_id)}")
         has_connection = has_x_account_connection(user_id)
-        logger.info(f"Connection check result for user {user_id}: {has_connection}")
+        logger.info(f"Connection check result for user {hash_user_id(user_id)}: {has_connection}")
         
         # Create action buttons
         keyboard = []
@@ -227,7 +228,7 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return CHOOSING_X_ACTION
         
     except Exception as e:
-        logger.error(f"Error in x_command_callback for user {user_id}: {e}")
+        logger.error(f"Error in x_command_callback for user {hash_user_id(user_id)}: {e}")
         await query.edit_message_text(
             "❌ An error occurred while processing your request. Please try again."
         )
@@ -259,8 +260,11 @@ async def handle_x_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id = query.message.chat_id if query.message else update.effective_chat.id
     
     try:
-        # Create OAuth state
-        state = create_oauth_state(user_id, chat_id)
+        # Get user's PIN from context (should be available from pin_protected decorator)
+        pin = context.user_data.get('pin') if context.user_data else None
+        
+        # Create OAuth state with PIN
+        state = create_oauth_state(user_id, chat_id, pin)
         
         # Generate PKCE parameters
         code_verifier, code_challenge = generate_pkce_challenge()
@@ -361,7 +365,7 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
         
         if not x_account:
             # Check if there's a corrupted record
-            logger.warning(f"Could not retrieve X account for user {user_id}, checking for corruption")
+            logger.warning(f"Could not retrieve X account for user {hash_user_id(user_id)}, checking for corruption")
             
             # Offer to clean up corrupted data
             keyboard = [
@@ -741,8 +745,9 @@ async def exchange_oauth_code(
             user_data = response.json()
             x_user_info = user_data.get('data', {})
         
-        # Get user's PIN from context
-        pin = context.user_data.get('pin')
+        # Get user's PIN from OAuth state data instead of context
+        state_data = get_oauth_state_data(state)
+        pin = state_data.get('pin') if state_data else None
         
         # Save X account connection
         success = save_x_account_connection(
@@ -762,10 +767,10 @@ async def exchange_oauth_code(
         pkce_verifiers.pop(state, None)
         
         if success:
-            logger.info(f"Successfully saved X account connection for user {user_id}")
+            logger.info(f"Successfully saved X account connection for user {hash_user_id(user_id)}")
             return True
         else:
-            logger.error(f"Failed to save X account connection for user {user_id}")
+            logger.error(f"Failed to save X account connection for user {hash_user_id(user_id)}")
             return False
             
     except Exception as e:
