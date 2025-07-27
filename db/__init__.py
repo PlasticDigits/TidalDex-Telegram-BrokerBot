@@ -70,7 +70,7 @@ __all__ = [
     'increment_pin_attempt',
     
     # X account operations
-    'save_x_account_connection', 'get_x_account_connection', 'delete_x_account_connection',
+    'save_x_account_connection', 'get_x_account_connection',
     'has_x_account_connection', 'create_x_accounts_table', 'XAccountData',
     
     # Type definitions

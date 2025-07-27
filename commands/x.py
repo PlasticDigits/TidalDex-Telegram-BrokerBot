@@ -18,7 +18,6 @@ from services.pin import pin_protected
 from db import (
     save_x_account_connection, get_x_account_connection, 
     delete_x_account_connection, has_x_account_connection,
-    debug_list_all_x_accounts, cleanup_invalid_x_accounts
 )
 from requests_oauth2client import OAuth2Client
 import httpx
@@ -107,12 +106,6 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
                 "Connect your X account to enable X-related features!\n\n"
                 "Choose an action:"
             )
-        
-        # Add debug options for troubleshooting
-        keyboard.extend([
-            [InlineKeyboardButton("🔧 Debug Database", callback_data="x_debug")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
-        ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_html(message_text, reply_markup=reply_markup)
@@ -151,8 +144,6 @@ async def x_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await handle_x_view(update, context)
         elif action == "x_disconnect":
             return await handle_x_disconnect(update, context)
-        elif action == "x_debug":
-            return await handle_x_debug(update, context)
         elif action == "x_retry":
             # Restart the x command
             return await x_command_callback(update, context)
@@ -221,11 +212,6 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "Choose an action:"
             )
         
-        # Add debug options for troubleshooting
-        keyboard.extend([
-            [InlineKeyboardButton("🔧 Debug Database", callback_data="x_debug")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
-        ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
@@ -468,72 +454,6 @@ async def handle_x_disconnect_confirm(update: Update, context: ContextTypes.DEFA
         )
         return ConversationHandler.END
 
-async def handle_x_debug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    """
-    Handle X account debugging.
-    
-    Args:
-        update: Telegram update object
-        context: Telegram context object
-        
-    Returns:
-        Next conversation state
-    """
-    query = update.callback_query
-    if not query or not update.effective_user:
-        return ConversationHandler.END
-    
-    user_id = update.effective_user.id
-    
-    try:
-        # List all X account records for debugging
-        all_records = debug_list_all_x_accounts()
-        
-        # Check connection status again
-        has_connection = has_x_account_connection(user_id)
-        
-        # Clean up invalid records
-        cleaned_count = cleanup_invalid_x_accounts()
-        
-        # Check connection status after cleanup
-        has_connection_after = has_x_account_connection(user_id)
-        
-        debug_info = (
-            f"🔧 <b>X Account Debug Information</b>\n\n"
-            f"👤 <b>Your User ID:</b> {user_id}\n"
-            f"📊 <b>Total X Records:</b> {len(all_records)}\n"
-            f"🔍 <b>Connection Check (before):</b> {has_connection}\n"
-            f"🧹 <b>Invalid Records Cleaned:</b> {cleaned_count}\n"
-            f"🔍 <b>Connection Check (after):</b> {has_connection_after}\n\n"
-        )
-        
-        if all_records:
-            debug_info += "📋 <b>All X Account Records:</b>\n"
-            for i, record in enumerate(all_records[:5], 1):  # Limit to 5 records
-                debug_info += f"{i}. User: {record.get('user_id', 'N/A')[:10]}..., X User: {record.get('x_username', 'N/A')}\n"
-            if len(all_records) > 5:
-                debug_info += f"... and {len(all_records) - 5} more records\n"
-        else:
-            debug_info += "📋 <b>No X account records found in database</b>\n"
-        
-        debug_info += "\n🔄 Try the /x command again to see if the issue is resolved."
-        
-        keyboard = [
-            [InlineKeyboardButton("🔄 Retry /x Command", callback_data="x_retry")],
-            [InlineKeyboardButton("◀️ Back", callback_data="x_back")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(debug_info, reply_markup=reply_markup, parse_mode='HTML')
-        return CHOOSING_X_ACTION
-        
-    except Exception as e:
-        logger.error(f"Error in handle_x_debug: {e}")
-        await query.edit_message_text(
-            "❌ An error occurred during debugging. Please try again."
-        )
-        return ConversationHandler.END
-
 async def poll_oauth_completion(
     context: ContextTypes.DEFAULT_TYPE, 
     user_id: int, 
@@ -748,7 +668,7 @@ x_conv_handler = ConversationHandler(
     entry_points=[],  # Will be set when imported in main.py
     states={
         CHOOSING_X_ACTION: [
-            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|debug|retry)$')
+            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|retry)$')
         ],
         WAITING_FOR_OAUTH: [
             CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')

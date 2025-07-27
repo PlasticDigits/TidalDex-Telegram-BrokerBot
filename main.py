@@ -458,20 +458,6 @@ def main() -> None:
             await update.effective_message.reply_text('An error occurred while processing your request.')
     
     application.add_error_handler(error_handler)
-
-    #DEBUGGING
-    # Add this near the end of your main() function, before application.run_polling()
-    async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Debug callback to see if button clicks are being captured."""
-        query = update.callback_query
-        if query:
-            logger.info(f"DEBUG: Received callback with data: {query.data}")
-            
-        else:
-            logger.warning("DEBUG: Received callback but update.callback_query is None")
-        
-    # Add this handler AFTER all your conversation handlers
-    application.add_handler(CallbackQueryHandler(debug_callback))
     
     # Add startup delay to prevent overlapping instances
     startup_delay = int(os.getenv('STARTUP_DELAY', '0'))  # Default 0 seconds
