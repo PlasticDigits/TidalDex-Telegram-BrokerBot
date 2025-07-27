@@ -80,9 +80,9 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     
     try:
         # Check if user has an existing X connection with detailed logging
-        logger.info(f"Checking X account connection for user {user_id}")
+        logger.info(f"Checking X account connection for user {hash_user_id(user_id)}")
         has_connection = has_x_account_connection(user_id)
-        logger.info(f"Connection check result for user {user_id}: {has_connection}")
+        logger.info(f"Connection check result for user {hash_user_id(user_id)}: {has_connection}")
         
         # Create action buttons
         keyboard = []

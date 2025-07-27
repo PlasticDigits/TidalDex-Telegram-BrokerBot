@@ -209,13 +209,14 @@ async def x_oauth_callback(
             status_code=500
         )
 
-def create_oauth_state(user_id: int, telegram_chat_id: int) -> str:
+def create_oauth_state(user_id: int, telegram_chat_id: int, pin: Optional[str] = None) -> str:
     """
     Create a new OAuth state for a user.
     
     Args:
         user_id: Telegram user ID
         telegram_chat_id: Telegram chat ID
+        pin: User PIN for encryption (optional)
         
     Returns:
         Generated state string
@@ -224,6 +225,7 @@ def create_oauth_state(user_id: int, telegram_chat_id: int) -> str:
     oauth_states[state] = {
         'user_id': user_id,
         'telegram_chat_id': telegram_chat_id,
+        'pin': pin,  # Store the PIN for later use
         'created_at': time.time(),
         'status': 'pending'
     }
