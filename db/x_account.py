@@ -122,6 +122,7 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
     user_id_str: str = hash_user_id(user_id)
     
     try:
+        logger.info(f"Getting X account connection for user: {user_id_str}")
         result = execute_query(
             "SELECT * FROM x_accounts WHERE user_id = ?",
             (user_id_str,),
@@ -129,7 +130,7 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
         )
         
         if not result or not isinstance(result, dict):
-            logger.debug(f"No X account connection found for user: {user_id_str}")
+            logger.error(f"No X account connection found for user: {user_id_str}")
             return None
         
         # Decrypt sensitive data

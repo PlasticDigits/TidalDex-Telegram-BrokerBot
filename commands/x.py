@@ -742,8 +742,11 @@ async def exchange_oauth_code(
                 logger.error(f"Failed to get user info from X API: {response.status_code}")
                 return False
             
+            
             user_data = response.json()
             x_user_info = user_data.get('data', {})
+            logger.info(f"User info from X API: {response.json()}")
+            logger.info(f"User info from X API: {x_user_info}")
         
         # Get user's PIN from OAuth state data instead of context
         state_data = get_oauth_state_data(state)
