@@ -4,7 +4,10 @@ X (Twitter) account connection command handler.
 import logging
 import asyncio
 import time
-from typing import Optional, Dict, Any
+import hashlib
+import base64
+import secrets
+from typing import Optional, Dict, Any, Tuple
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from urllib.parse import urlencode
@@ -14,7 +17,8 @@ from services.api import create_oauth_state, get_oauth_state_data, cleanup_oauth
 from services.pin import pin_protected
 from db import (
     save_x_account_connection, get_x_account_connection, 
-    delete_x_account_connection, has_x_account_connection
+    delete_x_account_connection, has_x_account_connection,
+    debug_list_all_x_accounts, cleanup_invalid_x_accounts
 )
 from requests_oauth2client import OAuth2Client
 import httpx
@@ -25,6 +29,25 @@ logger = logging.getLogger(__name__)
 # Conversation states
 CHOOSING_X_ACTION = "choosing_x_action"
 WAITING_FOR_OAUTH = "waiting_for_oauth"
+
+# Store PKCE verifiers temporarily
+pkce_verifiers: Dict[str, str] = {}
+
+def generate_pkce_challenge() -> Tuple[str, str]:
+    """
+    Generate PKCE code verifier and challenge.
+    
+    Returns:
+        Tuple of (code_verifier, code_challenge)
+    """
+    # Generate code verifier (43-128 characters, base64url)
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+    
+    # Generate code challenge (SHA256 hash of verifier, base64url encoded)
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).decode('utf-8').rstrip('=')
+    
+    return code_verifier, code_challenge
 
 # X OAuth client
 def get_x_oauth_client() -> OAuth2Client:
@@ -55,8 +78,10 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     user_id = update.effective_user.id
     
     try:
-        # Check if user has an existing X connection
+        # Check if user has an existing X connection with detailed logging
+        logger.info(f"Checking X account connection for user {user_id}")
         has_connection = has_x_account_connection(user_id)
+        logger.info(f"Connection check result for user {user_id}: {has_connection}")
         
         # Create action buttons
         keyboard = []
@@ -83,14 +108,18 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
                 "Choose an action:"
             )
         
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")])
+        # Add debug options for troubleshooting
+        keyboard.extend([
+            [InlineKeyboardButton("🔧 Debug Database", callback_data="x_debug")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
+        ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_html(message_text, reply_markup=reply_markup)
         return CHOOSING_X_ACTION
         
     except Exception as e:
-        logger.error(f"Error in x_command: {e}")
+        logger.error(f"Error in x_command for user {user_id}: {e}")
         await update.message.reply_html(
             "❌ An error occurred while processing your request. Please try again."
         )
@@ -122,12 +151,92 @@ async def x_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await handle_x_view(update, context)
         elif action == "x_disconnect":
             return await handle_x_disconnect(update, context)
+        elif action == "x_debug":
+            return await handle_x_debug(update, context)
+        elif action == "x_retry":
+            # Restart the x command
+            return await x_command_callback(update, context)
+        elif action == "x_back":
+            # Go back to main menu
+            return await x_command_callback(update, context)
         elif action == "x_cancel":
             await query.edit_message_text("❌ X account management cancelled.")
             return ConversationHandler.END
         else:
             await query.edit_message_text("❌ Unknown action. Please try again.")
             return ConversationHandler.END
+            
+    except Exception as e:
+        logger.error(f"Error in x_action_callback: {e}")
+        await query.edit_message_text(
+            "❌ An error occurred while processing your request. Please try again."
+        )
+        return ConversationHandler.END
+
+async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Callback version of x_command that works with query updates.
+    
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        
+    Returns:
+        Next conversation state
+    """
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return ConversationHandler.END
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Check if user has an existing X connection with detailed logging
+        logger.info(f"Checking X account connection for user {user_id}")
+        has_connection = has_x_account_connection(user_id)
+        logger.info(f"Connection check result for user {user_id}: {has_connection}")
+        
+        # Create action buttons
+        keyboard = []
+        
+        if has_connection:
+            keyboard.extend([
+                [InlineKeyboardButton("👀 View Connected Account", callback_data="x_view")],
+                [InlineKeyboardButton("🔄 Reconnect Account", callback_data="x_connect")],
+                [InlineKeyboardButton("❌ Disconnect Account", callback_data="x_disconnect")]
+            ])
+            message_text = (
+                "🐦 <b>X Account Management</b>\n\n"
+                "✅ You have an X account connected!\n\n"
+                "Choose an action:"
+            )
+        else:
+            keyboard.extend([
+                [InlineKeyboardButton("🔗 Connect X Account", callback_data="x_connect")]
+            ])
+            message_text = (
+                "🐦 <b>X Account Management</b>\n\n"
+                "❌ No X account connected.\n\n"
+                "Connect your X account to enable X-related features!\n\n"
+                "Choose an action:"
+            )
+        
+        # Add debug options for troubleshooting
+        keyboard.extend([
+            [InlineKeyboardButton("🔧 Debug Database", callback_data="x_debug")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
+        ])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='HTML')
+        return CHOOSING_X_ACTION
+        
+    except Exception as e:
+        logger.error(f"Error in x_command_callback for user {user_id}: {e}")
+        await query.edit_message_text(
+            "❌ An error occurred while processing your request. Please try again."
+        )
+        return ConversationHandler.END
             
     except Exception as e:
         logger.error(f"Error in x_action_callback: {e}")
@@ -158,18 +267,22 @@ async def handle_x_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Create OAuth state
         state = create_oauth_state(user_id, chat_id)
         
-        # Build authorization URL
+        # Generate PKCE parameters
+        code_verifier, code_challenge = generate_pkce_challenge()
+        
+        # Store code verifier for later use during token exchange
+        pkce_verifiers[state] = code_verifier
+        
+        # Build authorization URL with PKCE
         auth_params = {
             'response_type': 'code',
             'client_id': X_CLIENT_ID,
             'redirect_uri': X_REDIRECT_URI,
             'scope': X_SCOPES,
             'state': state,
+            'code_challenge': code_challenge,
             'code_challenge_method': 'S256',
         }
-        
-        # Generate PKCE code challenge (simplified for now)
-        # In production, you'd want to store the code_verifier securely
         
         auth_url = f"https://twitter.com/i/oauth2/authorize?{urlencode(auth_params)}"
         
@@ -355,6 +468,72 @@ async def handle_x_disconnect_confirm(update: Update, context: ContextTypes.DEFA
         )
         return ConversationHandler.END
 
+async def handle_x_debug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Handle X account debugging.
+    
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        
+    Returns:
+        Next conversation state
+    """
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return ConversationHandler.END
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # List all X account records for debugging
+        all_records = debug_list_all_x_accounts()
+        
+        # Check connection status again
+        has_connection = has_x_account_connection(user_id)
+        
+        # Clean up invalid records
+        cleaned_count = cleanup_invalid_x_accounts()
+        
+        # Check connection status after cleanup
+        has_connection_after = has_x_account_connection(user_id)
+        
+        debug_info = (
+            f"🔧 <b>X Account Debug Information</b>\n\n"
+            f"👤 <b>Your User ID:</b> {user_id}\n"
+            f"📊 <b>Total X Records:</b> {len(all_records)}\n"
+            f"🔍 <b>Connection Check (before):</b> {has_connection}\n"
+            f"🧹 <b>Invalid Records Cleaned:</b> {cleaned_count}\n"
+            f"🔍 <b>Connection Check (after):</b> {has_connection_after}\n\n"
+        )
+        
+        if all_records:
+            debug_info += "📋 <b>All X Account Records:</b>\n"
+            for i, record in enumerate(all_records[:5], 1):  # Limit to 5 records
+                debug_info += f"{i}. User: {record.get('user_id', 'N/A')[:10]}..., X User: {record.get('x_username', 'N/A')}\n"
+            if len(all_records) > 5:
+                debug_info += f"... and {len(all_records) - 5} more records\n"
+        else:
+            debug_info += "📋 <b>No X account records found in database</b>\n"
+        
+        debug_info += "\n🔄 Try the /x command again to see if the issue is resolved."
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Retry /x Command", callback_data="x_retry")],
+            [InlineKeyboardButton("◀️ Back", callback_data="x_back")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(debug_info, reply_markup=reply_markup, parse_mode='HTML')
+        return CHOOSING_X_ACTION
+        
+    except Exception as e:
+        logger.error(f"Error in handle_x_debug: {e}")
+        await query.edit_message_text(
+            "❌ An error occurred during debugging. Please try again."
+        )
+        return ConversationHandler.END
+
 async def poll_oauth_completion(
     context: ContextTypes.DEFAULT_TYPE, 
     user_id: int, 
@@ -461,23 +640,43 @@ async def exchange_oauth_code(
         True if successful, False otherwise
     """
     try:
-        # Get OAuth client
-        oauth_client = get_x_oauth_client()
-        
-        # Exchange code for token
-        token_response = oauth_client.authorization_code(
-            code=authorization_code,
-            redirect_uri=X_REDIRECT_URI
-        )
-        
-        if not token_response or not token_response.access_token:
-            logger.error("Failed to get access token from X")
+        # Get stored code verifier
+        code_verifier = pkce_verifiers.get(state)
+        if not code_verifier:
+            logger.error(f"Code verifier not found for state: {state}")
             return False
+        
+        # Exchange code for token using PKCE
+        token_data = {
+            'grant_type': 'authorization_code',
+            'client_id': X_CLIENT_ID,
+            'code': authorization_code,
+            'redirect_uri': X_REDIRECT_URI,
+            'code_verifier': code_verifier
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                'https://api.twitter.com/2/oauth2/token',
+                data=token_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to exchange code for token: {response.status_code} - {response.text}")
+                return False
+            
+            token_response = response.json()
+            access_token = token_response.get('access_token')
+            
+            if not access_token:
+                logger.error("No access token in response")
+                return False
         
         # Get user info from X API
         async with httpx.AsyncClient() as client:
             headers = {
-                'Authorization': f'Bearer {token_response.access_token}',
+                'Authorization': f'Bearer {access_token}',
                 'Content-Type': 'application/json'
             }
             
@@ -501,14 +700,17 @@ async def exchange_oauth_code(
             user_id=user_id,
             x_user_id=x_user_info.get('id'),
             x_username=x_user_info.get('username'),
-            access_token=token_response.access_token,
-            refresh_token=getattr(token_response, 'refresh_token', None),
-            token_expires_at=getattr(token_response, 'expires_at', None),
+            access_token=access_token,
+            refresh_token=token_response.get('refresh_token'),
+            token_expires_at=token_response.get('expires_in'),
             scope=X_SCOPES,
             x_display_name=x_user_info.get('name'),
             x_profile_image_url=x_user_info.get('profile_image_url'),
             pin=pin
         )
+        
+        # Clean up the code verifier
+        pkce_verifiers.pop(state, None)
         
         if success:
             logger.info(f"Successfully saved X account connection for user {user_id}")
@@ -519,6 +721,8 @@ async def exchange_oauth_code(
             
     except Exception as e:
         logger.error(f"Error in exchange_oauth_code: {e}")
+        # Clean up the code verifier on error
+        pkce_verifiers.pop(state, None)
         return False
 
 async def cancel_x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -544,7 +748,7 @@ x_conv_handler = ConversationHandler(
     entry_points=[],  # Will be set when imported in main.py
     states={
         CHOOSING_X_ACTION: [
-            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back)$')
+            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|debug|retry)$')
         ],
         WAITING_FOR_OAUTH: [
             CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')

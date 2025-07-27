@@ -3,7 +3,7 @@ Database operations for X (Twitter) account connections.
 """
 import logging
 import traceback
-from typing import Optional, Union, Dict, Any, TypedDict, cast
+from typing import Optional, Union, Dict, Any, TypedDict, cast, List
 from db.connections.connection import QueryResult
 from db.connection import execute_query
 from db.utils import encrypt_data, decrypt_data, hash_user_id
@@ -206,13 +206,18 @@ def has_x_account_connection(user_id: Union[int, str]) -> bool:
     user_id_str: str = hash_user_id(user_id)
     
     try:
+        logger.debug(f"Checking X account connection for user_id_str: {user_id_str}")
         result = execute_query(
             "SELECT 1 FROM x_accounts WHERE user_id = ? LIMIT 1",
             (user_id_str,),
             fetch='one'
         )
         
-        return result is not None
+        logger.debug(f"Database query result for user {user_id_str}: {result}")
+        has_connection = result is not None
+        logger.info(f"User {user_id_str} has X connection: {has_connection}")
+        
+        return has_connection
         
     except Exception as e:
         logger.error(f"Error checking X account connection for user {user_id_str}: {e}")
@@ -253,3 +258,43 @@ def create_x_accounts_table() -> bool:
         logger.error(f"Error creating X accounts table: {e}")
         logger.error(traceback.format_exc())
         return False 
+
+def cleanup_invalid_x_accounts() -> int:
+    """
+    Clean up any invalid or corrupted X account records.
+    
+    Returns:
+        Number of records cleaned up
+    """
+    try:
+        # Find records with missing required fields
+        invalid_records = execute_query(
+            """
+            SELECT user_id FROM x_accounts 
+            WHERE x_user_id IS NULL OR x_username IS NULL OR access_token IS NULL
+            """,
+            (),
+            fetch='all'
+        )
+        
+        if not invalid_records:
+            logger.info("No invalid X account records found")
+            return 0
+        
+        # Delete invalid records
+        result = execute_query(
+            """
+            DELETE FROM x_accounts 
+            WHERE x_user_id IS NULL OR x_username IS NULL OR access_token IS NULL
+            """,
+            ()
+        )
+        
+        count = len(invalid_records) if isinstance(invalid_records, (list, tuple)) else 1
+        logger.info(f"Cleaned up {count} invalid X account records")
+        return count
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up X account records: {e}")
+        logger.error(traceback.format_exc())
+        return 0 
