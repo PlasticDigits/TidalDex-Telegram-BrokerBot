@@ -74,9 +74,6 @@ def save_x_account_connection(
             fetch='one'
         )
         
-        logger.info(f"🔍 Debug: Existing check result: {existing} (type: {type(existing)})")
-        logger.info(f"🔍 Debug: Will {'UPDATE' if existing else 'INSERT'}")
-        
         if existing:
             # Update existing connection
             logger.info(f"Updating X account connection for user: {user_id_str}")
@@ -90,7 +87,6 @@ def save_x_account_connection(
                 (x_user_id, x_username, x_display_name, x_profile_image_url,
                  encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, user_id_str)
             )
-            logger.info(f"🔍 Debug: UPDATE result: {result} (type: {type(result)})")
         else:
             # Insert new connection
             logger.info(f"Creating new X account connection for user: {user_id_str}")
@@ -104,42 +100,6 @@ def save_x_account_connection(
                 (user_id_str, x_user_id, x_username, x_display_name, x_profile_image_url,
                  encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time)
             )
-            logger.info(f"🔍 Debug: INSERT result: {result} (type: {type(result)})")
-        
-        # Add immediate verification to debug the issue
-        if result is not None:
-            # Verify the record was actually saved
-            query_sql = "SELECT user_id, x_username FROM x_accounts WHERE user_id = ?"
-            query_params = (user_id_str,)
-            fetch_param = 'one'
-            
-            logger.info(f"🔍 Debug: About to execute verification query:")
-            logger.info(f"🔍 Debug: SQL: {query_sql}")
-            logger.info(f"🔍 Debug: Params: {query_params}")
-            logger.info(f"🔍 Debug: Fetch: '{fetch_param}' (type: {type(fetch_param)})")
-            
-            verification = execute_query(query_sql, query_params, fetch=fetch_param)
-            logger.info(f"🔍 Debug: Verification query result type: {type(verification)}, value: {verification}")
-            
-            if verification and isinstance(verification, dict):
-                logger.info(f"✅ Verification successful - X account record exists for user {user_id_str} with username @{verification.get('x_username')}")
-            elif verification:
-                logger.warning(f"⚠️ Verification returned unexpected type: {type(verification)} = {verification}")
-                # Try a different verification approach
-                count_check = execute_query(
-                    "SELECT COUNT(*) as count FROM x_accounts WHERE user_id = ?",
-                    (user_id_str,),
-                    fetch='one'
-                )
-                logger.info(f"🔍 Debug: Count check result: {count_check}")
-                if count_check and isinstance(count_check, dict) and count_check.get('count', 0) > 0:
-                    logger.info(f"✅ Count verification successful - record exists for user {user_id_str}")
-                else:
-                    logger.error(f"❌ Count verification FAILED - no record found for user {user_id_str}")
-                    return False
-            else:
-                logger.error(f"❌ Verification FAILED - X account record NOT found immediately after save for user {user_id_str}")
-                return False
         
         return result is not None
         
