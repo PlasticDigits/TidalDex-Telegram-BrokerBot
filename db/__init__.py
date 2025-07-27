@@ -37,7 +37,7 @@ from db.pin_attempt import (
 # Import X account operations
 from db.x_account import (
     save_x_account_connection, get_x_account_connection, delete_x_account_connection,
-    has_x_account_connection, create_x_accounts_table, XAccountData
+    has_x_account_connection, create_x_accounts_table, XAccountData, cleanup_corrupted_x_account
 )
 
 # Import types

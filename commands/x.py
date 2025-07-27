@@ -18,6 +18,7 @@ from services.pin import pin_protected
 from db import (
     save_x_account_connection, get_x_account_connection, 
     delete_x_account_connection, has_x_account_connection,
+    cleanup_corrupted_x_account,
 )
 from requests_oauth2client import OAuth2Client
 import httpx
@@ -153,6 +154,8 @@ async def x_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         elif action == "x_cancel":
             await query.edit_message_text("❌ X account management cancelled.")
             return ConversationHandler.END
+        elif action == "x_cleanup_connect":
+            return await handle_x_cleanup_connect(update, context)
         else:
             await query.edit_message_text("❌ Unknown action. Please try again.")
             return ConversationHandler.END
@@ -330,10 +333,28 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
         x_account = get_x_account_connection(user_id, pin)
         
         if not x_account:
+            # Check if there's a corrupted record
+            logger.warning(f"Could not retrieve X account for user {user_id}, checking for corruption")
+            
+            # Offer to clean up corrupted data
+            keyboard = [
+                [InlineKeyboardButton("🔧 Clean Up & Reconnect", callback_data="x_cleanup_connect")],
+                [InlineKeyboardButton("◀️ Back", callback_data="x_back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await query.edit_message_text(
-                "❌ No X account connection found. Please connect your account first."
+                "⚠️ <b>X Account Connection Issue</b>\n\n"
+                "There seems to be an issue with your X account data.\n"
+                "This might be due to:\n"
+                "• Data corruption\n"
+                "• PIN mismatch\n"
+                "• Invalid encryption\n\n"
+                "Would you like to clean up the corrupted data and reconnect?",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
             )
-            return ConversationHandler.END
+            return CHOOSING_X_ACTION
         
         # Format connection info
         connected_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(x_account.get('connected_at', 0)))
@@ -451,6 +472,49 @@ async def handle_x_disconnect_confirm(update: Update, context: ContextTypes.DEFA
         logger.error(f"Error in handle_x_disconnect_confirm: {e}")
         await query.edit_message_text(
             "❌ An error occurred while disconnecting. Please try again."
+        )
+        return ConversationHandler.END
+
+async def handle_x_cleanup_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """
+    Handle cleaning up corrupted X account data and reconnecting.
+    
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        
+    Returns:
+        Next conversation state
+    """
+    query = update.callback_query
+    if not query or not update.effective_user:
+        return ConversationHandler.END
+    
+    user_id = update.effective_user.id
+    
+    try:
+        # Attempt to clean up corrupted data
+        success = cleanup_corrupted_x_account(user_id)
+        
+        if success:
+            await query.edit_message_text(
+                "✅ <b>Corrupted X Account Data Cleaned</b>\n\n"
+                "Your corrupted X account data has been cleaned up.\n"
+                "You can now try to reconnect your X account.",
+                parse_mode='HTML'
+            )
+            # Restart the x command to show fresh options
+            return await x_command_callback(update, context)
+        else:
+            await query.edit_message_text(
+                "❌ Failed to clean up corrupted data. Please try again."
+            )
+            return ConversationHandler.END
+        
+    except Exception as e:
+        logger.error(f"Error in handle_x_cleanup_connect: {e}")
+        await query.edit_message_text(
+            "❌ An error occurred while cleaning up corrupted data. Please try again."
         )
         return ConversationHandler.END
 
@@ -575,11 +639,19 @@ async def exchange_oauth_code(
             'code_verifier': code_verifier
         }
         
+        # Create Basic auth header with client credentials
+        auth_string = f"{X_CLIENT_ID}:{X_CLIENT_SECRET}"
+        auth_bytes = auth_string.encode('utf-8')
+        auth_header = base64.b64encode(auth_bytes).decode('utf-8')
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 'https://api.twitter.com/2/oauth2/token',
                 data=token_data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': f'Basic {auth_header}'
+                }
             )
             
             if response.status_code != 200:
@@ -668,7 +740,7 @@ x_conv_handler = ConversationHandler(
     entry_points=[],  # Will be set when imported in main.py
     states={
         CHOOSING_X_ACTION: [
-            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|retry)$')
+            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|retry|cleanup_connect)$')
         ],
         WAITING_FOR_OAUTH: [
             CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')

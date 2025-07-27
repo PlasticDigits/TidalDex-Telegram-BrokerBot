@@ -142,10 +142,11 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
                     x_account_data['access_token'] = access_token
                     logger.debug(f"Successfully decrypted access token for user {user_id_str}")
                 else:
-                    logger.error(f"Failed to decrypt access token for user {user_id_str}")
+                    logger.error(f"Failed to decrypt access token for user {user_id_str} - data corruption or wrong PIN")
                     return None
             except Exception as e:
                 logger.error(f"Error decrypting access token for user {user_id_str}: {e}")
+                logger.error(f"This may indicate data corruption - consider cleaning up record for user {user_id_str}")
                 return None
         
         if x_account_data.get('refresh_token'):
@@ -160,6 +161,7 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
                 logger.warning(f"Error decrypting refresh token for user {user_id_str}: {e}")
                 x_account_data['refresh_token'] = None
         
+        logger.info(f"Successfully retrieved and decrypted X account data for user {user_id_str}")
         return x_account_data
         
     except Exception as e:
@@ -195,32 +197,78 @@ def delete_x_account_connection(user_id: Union[int, str]) -> bool:
 
 def has_x_account_connection(user_id: Union[int, str]) -> bool:
     """
-    Check if user has an X account connection.
+    Check if user has a valid X account connection that can be decrypted.
     
     Args:
         user_id: The Telegram user ID
         
     Returns:
-        True if user has a connection, False otherwise
+        True if user has a valid connection, False otherwise
     """
     user_id_str: str = hash_user_id(user_id)
     
     try:
         logger.debug(f"Checking X account connection for user_id_str: {user_id_str}")
+        
+        # First check if record exists
         result = execute_query(
-            "SELECT 1 FROM x_accounts WHERE user_id = ? LIMIT 1",
+            "SELECT access_token FROM x_accounts WHERE user_id = ? LIMIT 1",
             (user_id_str,),
             fetch='one'
         )
         
-        logger.debug(f"Database query result for user {user_id_str}: {result}")
-        has_connection = result is not None
-        logger.info(f"User {user_id_str} has X connection: {has_connection}")
+        if not result or not isinstance(result, dict):
+            logger.debug(f"No X account record found for user {user_id_str}")
+            return False
         
-        return has_connection
+        # Check if we can decrypt the access token (validates data integrity)
+        encrypted_access_token = result.get('access_token')
+        if not encrypted_access_token:
+            logger.warning(f"X account record exists but no access_token for user {user_id_str}")
+            return False
+        
+        # Try to decrypt without PIN first (for users without PIN requirement)
+        try:
+            test_decrypt = decrypt_data(encrypted_access_token, user_id, None)
+            if test_decrypt:
+                logger.debug(f"Successfully validated X connection (no PIN) for user {user_id_str}")
+                return True
+        except Exception as e:
+            logger.debug(f"Decryption without PIN failed for user {user_id_str}: {e}")
+        
+        # If decryption without PIN fails, the data might require a PIN or be corrupted
+        # We'll return False to indicate the connection is not usable without proper decryption
+        logger.warning(f"X account record exists but cannot decrypt data for user {user_id_str}")
+        return False
         
     except Exception as e:
         logger.error(f"Error checking X account connection for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+def cleanup_corrupted_x_account(user_id: Union[int, str]) -> bool:
+    """
+    Clean up corrupted X account record for a user.
+    
+    Args:
+        user_id: The Telegram user ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result = execute_query(
+            "DELETE FROM x_accounts WHERE user_id = ?",
+            (user_id_str,)
+        )
+        
+        logger.info(f"Cleaned up corrupted X account record for user: {user_id_str}")
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up corrupted X account for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
         return False
 
