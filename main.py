@@ -412,10 +412,10 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
             ],
             CHOOSING_X_ACTION: [
-                CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back)$')
+                CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|view_after_connect|disconnect|disconnect_confirm|cancel|back|retry|cleanup_connect)$')
             ],
             WAITING_FOR_OAUTH: [
-                CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')
+                CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel|retry|view_after_connect)$')
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_x_command)],

@@ -143,10 +143,14 @@ async def x_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return await handle_x_connect(update, context)
         elif action == "x_view":
             return await handle_x_view(update, context)
+        elif action == "x_view_after_connect":
+            # Handle viewing account after successful OAuth connection
+            # First, end the current conversation and start a fresh one
+            return await handle_x_view(update, context)
         elif action == "x_disconnect":
             return await handle_x_disconnect(update, context)
         elif action == "x_retry":
-            # Restart the x command
+            # Restart the x command from the beginning
             return await x_command_callback(update, context)
         elif action == "x_back":
             # Go back to main menu
@@ -156,6 +160,8 @@ async def x_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return ConversationHandler.END
         elif action == "x_cleanup_connect":
             return await handle_x_cleanup_connect(update, context)
+        elif action == "x_disconnect_confirm":
+            return await handle_x_disconnect_confirm(update, context)
         else:
             await query.edit_message_text("❌ Unknown action. Please try again.")
             return ConversationHandler.END
@@ -326,8 +332,29 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
     user_id = update.effective_user.id
     
     try:
-        # Get user's PIN from context (already validated by pin_protected decorator)
-        pin = context.user_data.get('pin')
+        # Get user's PIN from context (should be available from pin_protected decorator)
+        pin = context.user_data.get('pin') if context.user_data else None
+        
+        # If no PIN in context but user needs one, we need to handle this gracefully
+        if not pin:
+            # Check if user actually needs a PIN
+            from services.pin.PINManager import pin_manager
+            if pin_manager.needs_pin(user_id):
+                # User needs PIN but we don't have it - should restart the command flow
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Restart /x Command", callback_data="x_retry")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "🔐 <b>PIN Required</b>\n\n"
+                    "Your account requires PIN verification to view X account details.\n"
+                    "Please restart the /x command to enter your PIN.",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+                return CHOOSING_X_ACTION
         
         # Get X account connection
         x_account = get_x_account_connection(user_id, pin)
@@ -555,45 +582,75 @@ async def poll_oauth_completion(
                 )
                 
                 if success:
-                    # Update message with success
+                    # Update message with success and create button to restart /x command
                     try:
+                        keyboard = [
+                            [InlineKeyboardButton("👀 View Account Details", callback_data="x_view_after_connect")]
+                        ]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
                             text=(
                                 "✅ <b>X Account Connected Successfully!</b>\n\n"
                                 "Your X account has been connected and is ready to use.\n"
-                                "Use /x to view your connection details."
+                                "Click the button below to view your connection details."
                             ),
+                            reply_markup=reply_markup,
                             parse_mode='HTML'
                         )
                     except Exception as e:
-                        logger.error(f"Error updating message: {e}")
+                        logger.error(f"Error updating success message: {e}")
                 else:
-                    # Update message with error
+                    # Update message with error and provide retry option
                     try:
+                        keyboard = [
+                            [InlineKeyboardButton("🔄 Try Again", callback_data="x_retry")]
+                        ]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=message_id,
-                            text="❌ Failed to connect X account. Please try again."
+                            text=(
+                                "❌ <b>Connection Failed</b>\n\n"
+                                "Failed to connect your X account. This might be due to:\n"
+                                "• Authorization was denied\n"
+                                "• Token exchange failed\n"
+                                "• Network issues\n\n"
+                                "Please try connecting again."
+                            ),
+                            reply_markup=reply_markup,
+                            parse_mode='HTML'
                         )
                     except Exception as e:
-                        logger.error(f"Error updating message: {e}")
+                        logger.error(f"Error updating error message: {e}")
                 
                 # Clean up state
                 cleanup_oauth_state(state)
                 break
         else:
-            # Timeout
+            # Timeout - provide retry option
             try:
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Try Again", callback_data="x_retry")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=(
                         "⏰ <b>Authorization Timeout</b>\n\n"
-                        "The authorization process timed out.\n"
-                        "Please try again using the /x command."
+                        "The authorization process timed out after 5 minutes.\n"
+                        "This might happen if:\n"
+                        "• You didn't complete the authorization\n"
+                        "• There were network issues\n"
+                        "• The authorization page was closed\n\n"
+                        "Please try connecting again."
                     ),
+                    reply_markup=reply_markup,
                     parse_mode='HTML'
                 )
             except Exception as e:
@@ -740,10 +797,10 @@ x_conv_handler = ConversationHandler(
     entry_points=[],  # Will be set when imported in main.py
     states={
         CHOOSING_X_ACTION: [
-            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back|retry|cleanup_connect)$')
+            CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|view_after_connect|disconnect|disconnect_confirm|cancel|back|retry|cleanup_connect)$')
         ],
         WAITING_FOR_OAUTH: [
-            CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')
+            CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel|retry|view_after_connect)$')
         ],
     },
     fallbacks=[],  # Will be set when imported in main.py
