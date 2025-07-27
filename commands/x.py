@@ -91,7 +91,8 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
             keyboard.extend([
                 [InlineKeyboardButton("👀 View Connected Account", callback_data="x_view")],
                 [InlineKeyboardButton("🔄 Reconnect Account", callback_data="x_connect")],
-                [InlineKeyboardButton("❌ Disconnect Account", callback_data="x_disconnect")]
+                [InlineKeyboardButton("❌ Disconnect Account", callback_data="x_disconnect")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
             ])
             message_text = (
                 "🐦 <b>X Account Management</b>\n\n"
@@ -100,7 +101,8 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
             )
         else:
             keyboard.extend([
-                [InlineKeyboardButton("🔗 Connect X Account", callback_data="x_connect")]
+                [InlineKeyboardButton("🔗 Connect X Account", callback_data="x_connect")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
             ])
             message_text = (
                 "🐦 <b>X Account Management</b>\n\n"
@@ -204,7 +206,8 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             keyboard.extend([
                 [InlineKeyboardButton("👀 View Connected Account", callback_data="x_view")],
                 [InlineKeyboardButton("🔄 Reconnect Account", callback_data="x_connect")],
-                [InlineKeyboardButton("❌ Disconnect Account", callback_data="x_disconnect")]
+                [InlineKeyboardButton("❌ Disconnect Account", callback_data="x_disconnect")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
             ])
             message_text = (
                 "🐦 <b>X Account Management</b>\n\n"
@@ -213,7 +216,8 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         else:
             keyboard.extend([
-                [InlineKeyboardButton("🔗 Connect X Account", callback_data="x_connect")]
+                [InlineKeyboardButton("🔗 Connect X Account", callback_data="x_connect")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
             ])
             message_text = (
                 "🐦 <b>X Account Management</b>\n\n"
@@ -370,7 +374,8 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
             # Offer to clean up corrupted data
             keyboard = [
                 [InlineKeyboardButton("🔧 Clean Up & Reconnect", callback_data="x_cleanup_connect")],
-                [InlineKeyboardButton("◀️ Back", callback_data="x_back")]
+                [InlineKeyboardButton("◀️ Back", callback_data="x_back")],
+                [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -405,7 +410,8 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
         keyboard = [
             [InlineKeyboardButton("🔄 Reconnect", callback_data="x_connect")],
             [InlineKeyboardButton("❌ Disconnect", callback_data="x_disconnect")],
-            [InlineKeyboardButton("◀️ Back", callback_data="x_back")]
+            [InlineKeyboardButton("◀️ Back", callback_data="x_back")],
+            [InlineKeyboardButton("🚫 Cancel", callback_data="x_cancel")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
