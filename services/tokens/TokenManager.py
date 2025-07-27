@@ -411,7 +411,7 @@ class TokenManager:
             logger.error(f"Failed to get balance history for token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
             return []
         
-    def get_token_balance(self, wallet_address: str, token_address: str) -> int:
+    async def get_token_balance(self, wallet_address: str, token_address: str) -> int:
         """Get the balance of a specific token for a wallet.
         
         Args:
@@ -423,7 +423,7 @@ class TokenManager:
         """
         try:
             token_address = w3.to_checksum_address(token_address)
-            return get_token_balance(wallet_address, token_address)
+            return await get_token_balance(wallet_address, token_address)
         except Exception as e:
             logger.error(f"Failed to get token balance for {token_address} for wallet {wallet_address}: {str(e)}")
             return 0

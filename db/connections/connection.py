@@ -244,6 +244,22 @@ def init_db() -> bool:
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
         );
+        
+        -- X accounts table for storing X (Twitter) OAuth connections
+        CREATE TABLE IF NOT EXISTS x_accounts (
+            user_id TEXT PRIMARY KEY,
+            x_user_id TEXT NOT NULL,
+            x_username TEXT NOT NULL,
+            x_display_name TEXT,
+            x_profile_image_url TEXT,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT,
+            token_expires_at INTEGER,
+            scope TEXT NOT NULL,
+            connected_at INTEGER NOT NULL,
+            last_updated INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
     '''
     
     # PostgreSQL initialization script - customized for PostgreSQL syntax
@@ -323,6 +339,22 @@ def init_db() -> bool:
             timestamp INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
             FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE CASCADE
+        );
+        
+        -- X accounts table for storing X (Twitter) OAuth connections
+        CREATE TABLE IF NOT EXISTS x_accounts (
+            user_id TEXT PRIMARY KEY,
+            x_user_id TEXT NOT NULL,
+            x_username TEXT NOT NULL,
+            x_display_name TEXT,
+            x_profile_image_url TEXT,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT,
+            token_expires_at INTEGER,
+            scope TEXT NOT NULL,
+            connected_at INTEGER NOT NULL,
+            last_updated INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
     '''
         

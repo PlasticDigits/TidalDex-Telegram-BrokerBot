@@ -1,0 +1,255 @@
+"""
+Database operations for X (Twitter) account connections.
+"""
+import logging
+import traceback
+from typing import Optional, Union, Dict, Any, TypedDict, cast
+from db.connections.connection import QueryResult
+from db.connection import execute_query
+from db.utils import encrypt_data, decrypt_data, hash_user_id
+import time
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
+# Define TypedDict for X account data
+class XAccountData(TypedDict, total=False):
+    """TypedDict for X account data"""
+    user_id: str
+    x_user_id: str
+    x_username: str
+    x_display_name: Optional[str]
+    x_profile_image_url: Optional[str]
+    access_token: str
+    refresh_token: Optional[str]
+    token_expires_at: Optional[int]
+    scope: str
+    connected_at: int
+    last_updated: int
+
+def save_x_account_connection(
+    user_id: Union[int, str],
+    x_user_id: str,
+    x_username: str,
+    access_token: str,
+    refresh_token: Optional[str] = None,
+    token_expires_at: Optional[int] = None,
+    scope: str = "tweet.read users.read follows.read like.read",
+    x_display_name: Optional[str] = None,
+    x_profile_image_url: Optional[str] = None,
+    pin: Optional[str] = None
+) -> bool:
+    """
+    Save or update X account connection for a user.
+    
+    Args:
+        user_id: The Telegram user ID
+        x_user_id: The X (Twitter) user ID
+        x_username: The X (Twitter) username
+        access_token: OAuth access token
+        refresh_token: OAuth refresh token (optional)
+        token_expires_at: Token expiration timestamp (optional)
+        scope: OAuth scopes granted
+        x_display_name: X display name (optional)
+        x_profile_image_url: X profile image URL (optional)
+        pin: User PIN for encryption
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    user_id_str: str = hash_user_id(user_id)
+    current_time: int = int(time.time())
+    
+    try:
+        # Encrypt sensitive data
+        encrypted_access_token = encrypt_data(access_token, user_id, pin)
+        encrypted_refresh_token = None
+        if refresh_token:
+            encrypted_refresh_token = encrypt_data(refresh_token, user_id, pin)
+        
+        # Check if connection already exists
+        existing = execute_query(
+            "SELECT user_id FROM x_accounts WHERE user_id = ?",
+            (user_id_str,),
+            fetch='one'
+        )
+        
+        if existing:
+            # Update existing connection
+            logger.info(f"Updating X account connection for user: {user_id_str}")
+            result = execute_query(
+                """
+                UPDATE x_accounts SET 
+                    x_user_id = ?, x_username = ?, x_display_name = ?, x_profile_image_url = ?,
+                    access_token = ?, refresh_token = ?, token_expires_at = ?, scope = ?, last_updated = ?
+                WHERE user_id = ?
+                """,
+                (x_user_id, x_username, x_display_name, x_profile_image_url,
+                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, user_id_str)
+            )
+        else:
+            # Insert new connection
+            logger.info(f"Creating new X account connection for user: {user_id_str}")
+            result = execute_query(
+                """
+                INSERT INTO x_accounts 
+                (user_id, x_user_id, x_username, x_display_name, x_profile_image_url, 
+                 access_token, refresh_token, token_expires_at, scope, connected_at, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id_str, x_user_id, x_username, x_display_name, x_profile_image_url,
+                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time)
+            )
+        
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Error saving X account connection for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None) -> Optional[XAccountData]:
+    """
+    Get X account connection for a user.
+    
+    Args:
+        user_id: The Telegram user ID
+        pin: User PIN for decryption
+        
+    Returns:
+        X account data or None if not found
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result = execute_query(
+            "SELECT * FROM x_accounts WHERE user_id = ?",
+            (user_id_str,),
+            fetch='one'
+        )
+        
+        if not result or not isinstance(result, dict):
+            logger.debug(f"No X account connection found for user: {user_id_str}")
+            return None
+        
+        # Decrypt sensitive data
+        x_account_data: XAccountData = cast(XAccountData, dict(result))
+        
+        if x_account_data.get('access_token'):
+            try:
+                access_token = decrypt_data(x_account_data['access_token'], user_id, pin)
+                if access_token:
+                    x_account_data['access_token'] = access_token
+                    logger.debug(f"Successfully decrypted access token for user {user_id_str}")
+                else:
+                    logger.error(f"Failed to decrypt access token for user {user_id_str}")
+                    return None
+            except Exception as e:
+                logger.error(f"Error decrypting access token for user {user_id_str}: {e}")
+                return None
+        
+        if x_account_data.get('refresh_token'):
+            try:
+                refresh_token = decrypt_data(x_account_data['refresh_token'], user_id, pin)
+                if refresh_token:
+                    x_account_data['refresh_token'] = refresh_token
+                else:
+                    logger.warning(f"Failed to decrypt refresh token for user {user_id_str}")
+                    x_account_data['refresh_token'] = None
+            except Exception as e:
+                logger.warning(f"Error decrypting refresh token for user {user_id_str}: {e}")
+                x_account_data['refresh_token'] = None
+        
+        return x_account_data
+        
+    except Exception as e:
+        logger.error(f"Error getting X account connection for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+def delete_x_account_connection(user_id: Union[int, str]) -> bool:
+    """
+    Delete X account connection for a user.
+    
+    Args:
+        user_id: The Telegram user ID
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result = execute_query(
+            "DELETE FROM x_accounts WHERE user_id = ?",
+            (user_id_str,)
+        )
+        
+        logger.info(f"Deleted X account connection for user: {user_id_str}")
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Error deleting X account connection for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+def has_x_account_connection(user_id: Union[int, str]) -> bool:
+    """
+    Check if user has an X account connection.
+    
+    Args:
+        user_id: The Telegram user ID
+        
+    Returns:
+        True if user has a connection, False otherwise
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    try:
+        result = execute_query(
+            "SELECT 1 FROM x_accounts WHERE user_id = ? LIMIT 1",
+            (user_id_str,),
+            fetch='one'
+        )
+        
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Error checking X account connection for user {user_id_str}: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+def create_x_accounts_table() -> bool:
+    """
+    Create the x_accounts table if it doesn't exist.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # SQLite table creation
+        sqlite_sql = """
+        CREATE TABLE IF NOT EXISTS x_accounts (
+            user_id TEXT PRIMARY KEY,
+            x_user_id TEXT NOT NULL,
+            x_username TEXT NOT NULL,
+            x_display_name TEXT,
+            x_profile_image_url TEXT,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT,
+            token_expires_at INTEGER,
+            scope TEXT NOT NULL,
+            connected_at INTEGER NOT NULL,
+            last_updated INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        """
+        
+        result = execute_query(sqlite_sql)
+        logger.info("X accounts table created successfully")
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Error creating X accounts table: {e}")
+        logger.error(traceback.format_exc())
+        return False 

@@ -28,6 +28,9 @@ get_wallet_balance: Callable[[str, Optional[str]], Awaitable[int]] = wallet_mana
 has_user_wallet: Callable[[str, Optional[str]], bool] = wallet_manager.has_user_wallet
 create_mnemonic: Callable[[str, Optional[str]], Optional[str]] = wallet_manager.create_mnemonic
 has_user_mnemonic: Callable[[str, Optional[str]], bool] = wallet_manager.has_user_mnemonic
+get_user_mnemonic: Callable[[str, Optional[str]], Optional[str]] = wallet_manager.get_user_mnemonic
+save_user_wallet: Callable[[str, WalletData, str, Optional[str]], bool] = wallet_manager.save_user_wallet
+save_user_mnemonic: Callable[[str, str, Optional[str]], bool] = wallet_manager.save_user_mnemonic
 
 # Export the wallet manager instance
 __all__ = [
@@ -46,5 +49,8 @@ __all__ = [
     'get_wallet_balance',
     'has_user_wallet',
     'create_mnemonic',
-    'has_user_mnemonic'
+    'has_user_mnemonic',
+    'get_user_mnemonic',
+    'save_user_wallet',
+    'save_user_mnemonic'
 ] 

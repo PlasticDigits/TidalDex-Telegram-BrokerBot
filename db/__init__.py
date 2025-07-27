@@ -34,6 +34,12 @@ from db.pin_attempt import (
     increment_pin_attempt, create_pin_attempts_table
 )
 
+# Import X account operations
+from db.x_account import (
+    save_x_account_connection, get_x_account_connection, delete_x_account_connection,
+    has_x_account_connection, create_x_accounts_table, XAccountData
+)
+
 # Import types
 from db.connections.connection import (
     DBConnection, DBCursor, QueryResult, DBConnectionGenerator
@@ -62,6 +68,10 @@ __all__ = [
     # PIN attempt operations
     'get_pin_attempt_data', 'save_pin_attempt_data', 'reset_pin_attempts',
     'increment_pin_attempt',
+    
+    # X account operations
+    'save_x_account_connection', 'get_x_account_connection', 'delete_x_account_connection',
+    'has_x_account_connection', 'create_x_accounts_table', 'XAccountData',
     
     # Type definitions
     'QueryResult',

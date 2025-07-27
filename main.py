@@ -80,6 +80,11 @@ from commands.swap import (
     CHOOSING_FROM_TOKEN, CHOOSING_TO_TOKEN, ENTERING_AMOUNT, ENTERING_SLIPPAGE, CONFIRMING_SWAP,
     swap_command
 )
+# Import X account management command
+from commands.x import (
+    x_command, x_conv_handler, cancel_x_command, x_action_callback,
+    CHOOSING_X_ACTION, WAITING_FOR_OAUTH
+)
 from services.pin.pin_decorators import PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -231,6 +236,7 @@ def main() -> None:
     recover_wrapper = create_private_chat_wrapper(recover_command)
     balance_wrapper = create_private_chat_wrapper(pin_protected_balance)
     scan_wrapper = create_private_chat_wrapper(pin_protected_scan)
+    x_wrapper = create_private_chat_wrapper(x_command)
 
     # Add command handlers for public commands
     application.add_handler(CommandHandler("start", start_wrapper))
@@ -394,6 +400,28 @@ def main() -> None:
     application.add_handler(rename_wallet_conv_handler)
     application.add_handler(set_pin_conv_handler)
     application.add_handler(swap_conv_handler)
+    
+    # Add X conversation handler with proper configuration
+    x_conv_handler_configured = ConversationHandler(
+        entry_points=[CommandHandler("x", x_wrapper)],
+        states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            CHOOSING_X_ACTION: [
+                CallbackQueryHandler(x_action_callback, pattern=r'^x_(connect|view|disconnect|disconnect_confirm|cancel|back)$')
+            ],
+            WAITING_FOR_OAUTH: [
+                CallbackQueryHandler(x_action_callback, pattern=r'^x_(cancel)$')
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_x_command)],
+        name="x_conversation"
+    )
+    application.add_handler(x_conv_handler_configured)
     
     # Add token tracking handlers
     application.add_handler(track_conv_handler)

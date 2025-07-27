@@ -38,6 +38,13 @@ CL8Y_BB_FEE_BPS: int = int(get_env_var('CL8Y_BB_FEE_BPS', 100))
 # PIN security settings
 PIN_EXPIRATION_TIME: int = int(get_env_var('PIN_EXPIRATION_TIME', 1800))  # Default: 30 minutes (in seconds)
 
+# X (Twitter) OAuth 2.0 settings
+X_OAUTH_BASE_URL: str = get_env_var('X_OAUTH_BASE_URL')
+X_CLIENT_ID: str = get_env_var('X_CLIENT_ID')
+X_CLIENT_SECRET: str = get_env_var('X_CLIENT_SECRET')
+X_REDIRECT_URI: str = f"{X_OAUTH_BASE_URL}/x-oauth"  # OAuth callback endpoint
+X_SCOPES: str = "tweet.read users.read follows.read like.read"  # Scopes for profile, replies, shares, and likes
+
 # API Server settings (for render.com deployment)
 API_HOST: str = get_env_var('API_HOST', '0.0.0.0')  # Default: bind to all interfaces
 API_PORT: int = int(get_env_var('API_PORT', 10000))  # Default: render.com expected port
