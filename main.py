@@ -4,6 +4,8 @@ import sys
 import atexit
 import asyncio
 import threading
+import signal
+import time
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 from telegram import Update
 import traceback
@@ -101,6 +103,64 @@ logging.getLogger('telegram').setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+# Global application instance for signal handling
+application_instance = None
+shutdown_event = threading.Event()
+
+def graceful_shutdown(signum: int, frame) -> None:
+    """Handle shutdown signals gracefully."""
+    logger.info(f"Received signal {signum}. Initiating graceful shutdown...")
+    shutdown_event.set()
+    
+    if application_instance:
+        logger.info("Stopping bot application...")
+        try:
+            # Schedule the shutdown in the event loop
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop, create a new one
+                pass
+            
+            if loop and not loop.is_closed():
+                # Create shutdown task in existing loop
+                def shutdown_task():
+                    try:
+                        if hasattr(application_instance, 'stop'):
+                            asyncio.create_task(application_instance.stop())
+                    except Exception as e:
+                        logger.error(f"Error scheduling shutdown: {e}")
+                
+                loop.call_soon_threadsafe(shutdown_task)
+            else:
+                # Fallback - force stop via updater
+                if hasattr(application_instance, 'updater') and application_instance.updater:
+                    application_instance.updater.stop()
+                    
+            logger.info("Bot shutdown initiated")
+        except Exception as e:
+            logger.error(f"Error stopping application: {e}")
+    
+    # Close database connections
+    try:
+        db.close_connection()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database: {e}")
+    
+    logger.info("Graceful shutdown completed")
+    # Use os._exit to force exit
+    os._exit(0)
+
+def setup_signal_handlers() -> None:
+    """Setup signal handlers for graceful shutdown."""
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    # Add SIGUSR1 for custom shutdown signal
+    signal.signal(signal.SIGUSR1, graceful_shutdown)
+    logger.info("Signal handlers configured")
+
 def start_api_server_thread() -> None:
     """Start the API server in a separate thread."""
     try:
@@ -146,6 +206,10 @@ def main() -> None:
         return
     
     application = Application.builder().token(token).build()
+    global application_instance
+    application_instance = application
+    
+    setup_signal_handlers()
     
     # Create private chat wrappers for all command handlers
     start_wrapper = create_private_chat_wrapper(start)
@@ -381,8 +445,43 @@ def main() -> None:
     # Add this handler AFTER all your conversation handlers
     application.add_handler(CallbackQueryHandler(debug_callback))
     
-    # Start the Bot
-    application.run_polling()
+    # Add startup delay to prevent overlapping instances
+    startup_delay = int(os.getenv('STARTUP_DELAY', '0'))  # Default 0 seconds
+    if startup_delay > 0:
+        logger.info(f"Waiting {startup_delay} seconds before starting polling to prevent instance overlap...")
+        time.sleep(startup_delay)
+    
+    # Check if shutdown was requested during startup delay
+    if shutdown_event.is_set():
+        logger.info("Shutdown requested during startup delay. Exiting.")
+        return
+    
+    # Start the Bot with better error handling
+    logger.info("Starting bot polling...")
+    try:
+        application.run_polling(
+            drop_pending_updates=True,  # Clear any pending updates
+            close_loop=False,           # Let the application manage the loop
+            stop_signals=None           # We handle signals manually
+        )
+    except Exception as e:
+        if "Conflict" in str(e) and "getUpdates" in str(e):
+            logger.warning("Bot conflict detected - another instance may be running. Waiting before retry...")
+            time.sleep(15)  # Wait 15 seconds before potential restart
+            if not shutdown_event.is_set():
+                logger.info("Retrying bot startup...")
+                try:
+                    application.run_polling(
+                        drop_pending_updates=True,
+                        close_loop=False,
+                        stop_signals=None
+                    )
+                except Exception as retry_e:
+                    logger.error(f"Retry failed: {retry_e}")
+                    raise
+        else:
+            logger.error(f"Bot polling failed: {e}")
+            raise
 
     return
 
