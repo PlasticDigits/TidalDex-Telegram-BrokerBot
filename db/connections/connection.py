@@ -193,10 +193,6 @@ def init_db() -> bool:
             UNIQUE(user_id, name)
         );
         
-        -- Add foreign key for active_wallet_id in users table (circular reference)
-        -- SQLite allows for adding this constraint later
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS active_wallet_id INTEGER REFERENCES wallets(id) ON DELETE SET NULL;
-        
         -- Mnemonics table for seed phrases
         CREATE TABLE IF NOT EXISTS mnemonics (
             user_id TEXT PRIMARY KEY,
