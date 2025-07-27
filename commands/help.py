@@ -56,6 +56,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/balance - View your tracked token balances\n"
         "/track_stop - Stop tracking a token\n\n"
         
+        "Social Media:\n"
+        "/x - Connect your X (Twitter) account for raids, airdrops, and more\n\n"
+        
         "Other:\n"
         "/help - Show this help message\n"
         "/start - Start or restart the bot\n"
@@ -109,6 +112,9 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "/track - Track a token's balance over time\n"
         "/balance - View your tracked token balances\n"
         "/track_stop - Stop tracking a token\n\n"
+        
+        "Social Media:\n"
+        "/x - Connect your X (Twitter) account for raids, airdrops, and more\n\n"
         
         "Other:\n"
         "/help - Show this help message\n"
