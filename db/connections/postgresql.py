@@ -28,7 +28,7 @@ _connection_pool = None
 # Import QueryResult type from local module instead of db
 from db.connections.connection import QueryResult
 
-def retry_on_db_error(max_attempts: int = 5, initial_wait: float = 0.1, error_classes: tuple = (psycopg2.OperationalError,)) -> Callable:
+def retry_on_db_error(max_attempts: int = 5, initial_wait: float = 0.1, error_classes: Optional[tuple] = None) -> Callable:
     """
     Decorator to retry a database operation on specific PostgreSQL errors.
     
@@ -45,6 +45,11 @@ def retry_on_db_error(max_attempts: int = 5, initial_wait: float = 0.1, error_cl
         def wrapper(*args, **kwargs):
             if not POSTGRESQL_AVAILABLE:
                 raise ImportError("psycopg2 is not installed. Please install it with 'pip install psycopg2-binary'")
+            
+            # Set default error classes here (at runtime, not import time)
+            actual_error_classes = error_classes
+            if actual_error_classes is None:
+                actual_error_classes = (psycopg2.OperationalError,)
                 
             wait_time = initial_wait
             last_error = None
@@ -52,7 +57,7 @@ def retry_on_db_error(max_attempts: int = 5, initial_wait: float = 0.1, error_cl
             for attempt in range(max_attempts):
                 try:
                     return func(*args, **kwargs)
-                except error_classes as e:
+                except actual_error_classes as e:
                     last_error = e
                     # Exponential backoff
                     wait_time *= 2
