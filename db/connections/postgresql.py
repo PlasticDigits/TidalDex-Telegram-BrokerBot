@@ -426,11 +426,14 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
             result = cursor.fetchmany()
             logger.debug(f"Fetched many results: {len(result) if result else 0} rows")
         else:
-            logger.debug(f"No fetch requested, rowcount: {cursor.rowcount}")
+            # For INSERT/UPDATE/DELETE operations, return the rowcount
+            result = cursor.rowcount
+            logger.debug(f"No fetch requested, rowcount: {result}")
         
         cursor.close()
-        if result is None:
-            return -1 # compatibility with sqlite3
+        # Remove the problematic -1 return for None results since:
+        # - For SELECT with fetch='one', None means "no rows found" (valid result)
+        # - For INSERT/UPDATE/DELETE, result should now be rowcount (never None)
         return result
     except Exception as e:
         if conn:
