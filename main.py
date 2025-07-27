@@ -2,6 +2,8 @@ import os
 import logging
 import sys
 import atexit
+import asyncio
+import threading
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 from telegram import Update
 import traceback
@@ -20,6 +22,8 @@ from utils.self_destruction_message import (
 from services.pin import handle_pin_input
 # Import restructured database module
 import db
+# Import FastAPI server
+from services.api import run_api_server
 
 # Import command handlers from commands package
 from commands.start import start
@@ -97,8 +101,17 @@ logging.getLogger('telegram').setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+def start_api_server_thread() -> None:
+    """Start the API server in a separate thread."""
+    try:
+        logger.info("Starting API server thread...")
+        run_api_server()
+    except Exception as e:
+        logger.error(f"Error in API server thread: {e}")
+        logger.error(traceback.format_exc())
+
 def main() -> None:
-    """Start the bot."""
+    """Start the bot and API server."""
     # Initialize the database first
     logger.info("Initializing database...")
     if not db.init_db():
@@ -120,6 +133,11 @@ def main() -> None:
         logger.error(f"Database test failed: {e}")
         logger.error(traceback.format_exc())
         return
+    
+    # Start API server in a separate thread
+    api_thread = threading.Thread(target=start_api_server_thread, daemon=True)
+    api_thread.start()
+    logger.info("API server thread started")
     
     # Create the Application
     token = TELEGRAM_BOT_TOKEN

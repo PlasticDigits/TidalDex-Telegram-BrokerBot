@@ -34,8 +34,13 @@ INTERMEDIATE_LP_ADDRESS: str = get_env_var('INTERMEDIATE_LP_ADDRESS')
 WETH: str = get_env_var('WETH')
 CL8Y_BUY_AND_BURN: str = get_env_var('CL8Y_BUY_AND_BURN')
 CL8Y_BB_FEE_BPS: int = int(get_env_var('CL8Y_BB_FEE_BPS', 100))
+
 # PIN security settings
 PIN_EXPIRATION_TIME: int = int(get_env_var('PIN_EXPIRATION_TIME', 1800))  # Default: 30 minutes (in seconds)
+
+# API Server settings (for render.com deployment)
+API_HOST: str = get_env_var('API_HOST', '0.0.0.0')  # Default: bind to all interfaces
+API_PORT: int = int(get_env_var('API_PORT', 10000))  # Default: render.com expected port
 
 # Wallet derivation path settings
 DEFAULT_DERIVATION_PATH: str = "m/44'/60'/0'/0/0"  # Default path for first Ethereum account
