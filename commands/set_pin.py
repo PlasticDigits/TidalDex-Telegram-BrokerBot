@@ -131,7 +131,7 @@ async def process_pin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         logger.warning(f"Could not delete message with new PIN: {e}")
     
     # Validate PIN complexity
-    validation_result: Tuple[bool, Optional[str]] = validate_pin_complexity(new_pin)
+    validation_result: Tuple[bool, Optional[str]] = pin_manager.validate_pin_complexity(new_pin)
     is_valid: bool = validation_result[0]
     error_message: Optional[str] = validation_result[1]
     
@@ -276,24 +276,3 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "🚫 PIN setting canceled. Your current PIN settings remain unchanged."
     )
     return ConversationHandler.END
-
-def validate_pin_complexity(pin: str) -> Tuple[bool, Optional[str]]:
-    """
-    Validate that the PIN meets complexity requirements.
-    
-    Args:
-        pin (str): The PIN to validate
-        
-    Returns:
-        tuple: (is_valid, error_message)
-    """
-    if not pin:
-        return False, "PIN cannot be empty"
-        
-    if len(pin) < 4:
-        return False, "PIN must be at least 4 characters long"
-        
-    if len(pin) > 48:
-        return False, "PIN cannot be longer than 48 characters"
-        
-    return True, None 

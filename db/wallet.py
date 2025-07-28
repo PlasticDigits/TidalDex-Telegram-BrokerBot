@@ -7,7 +7,6 @@ from typing import Optional, Union, Dict, Any, List, Tuple, TypedDict, cast
 from db.connections.connection import QueryResult
 from db.connection import execute_query
 from db.utils import encrypt_data, decrypt_data, hash_user_id
-from db.pin import has_pin
 from db.mnemonic import get_user_mnemonic
 from wallet.mnemonic import derive_wallet_from_mnemonic
 import time

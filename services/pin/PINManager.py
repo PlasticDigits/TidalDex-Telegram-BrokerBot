@@ -310,6 +310,27 @@ class PINManager:
         Check if a user has a PIN set.
         """
         return self.needs_pin(user_id)
+    
+    def validate_pin_complexity(self, pin: str) -> Tuple[bool, Optional[str]]:
+        """
+        Validate that the PIN meets complexity requirements.
+        
+        Args:
+            pin: The PIN to validate
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        if not pin:
+            return False, "PIN cannot be empty"
+            
+        if len(pin) < 4:
+            return False, "PIN must be at least 4 characters long"
+            
+        if len(pin) > 48:
+            return False, "PIN cannot be longer than 48 characters"
+            
+        return True, None
 
 # Create and export singleton instance
 pin_manager: PINManager = PINManager() 

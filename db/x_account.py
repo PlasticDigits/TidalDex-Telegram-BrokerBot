@@ -229,17 +229,16 @@ def has_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
             logger.warning(f"X account record exists but no access_token for user {user_id_str}")
             return False
         
-        # Try to decrypt without PIN first (for users without PIN requirement)
-        try:
-            test_decrypt = decrypt_data(encrypted_access_token, user_id, None)
-            if test_decrypt:
-                logger.debug(f"Successfully validated X connection (no PIN) for user {user_id_str}")
-                return True
-        except Exception as e:
-            logger.debug(f"Decryption without PIN failed for user {user_id_str}: {e}")
+        # Check if user has a PIN to determine the right decryption approach
+        from services.pin.PINManager import pin_manager
+        user_has_pin = pin_manager.has_pin(user_id)
         
-        # If decryption without PIN fails, try with PIN if provided
-        if pin:
+        if user_has_pin:
+            # User has a PIN, so we need PIN for decryption
+            if not pin:
+                logger.debug(f"X account record exists but PIN required for user {user_id_str}")
+                return False
+            
             try:
                 test_decrypt = decrypt_data(encrypted_access_token, user_id, pin)
                 if test_decrypt:
@@ -251,10 +250,19 @@ def has_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
             except Exception as e:
                 logger.warning(f"Decryption with PIN failed for user {user_id_str}: {e}")
                 return False
-        
-        # If no PIN provided but data seems to require PIN, we can't validate
-        logger.debug(f"X account record exists but may require PIN for user {user_id_str}")
-        return False
+        else:
+            # User doesn't have a PIN, decrypt without PIN
+            try:
+                test_decrypt = decrypt_data(encrypted_access_token, user_id, None)
+                if test_decrypt:
+                    logger.debug(f"Successfully validated X connection (no PIN) for user {user_id_str}")
+                    return True
+                else:
+                    logger.warning(f"X account record exists but decryption failed for user {user_id_str}")
+                    return False
+            except Exception as e:
+                logger.warning(f"Decryption without PIN failed for user {user_id_str}: {e}")
+                return False
         
     except Exception as e:
         logger.error(f"Error checking X account connection for user {user_id_str}: {e}")
