@@ -196,12 +196,13 @@ def delete_x_account_connection(user_id: Union[int, str]) -> bool:
         logger.error(traceback.format_exc())
         return False
 
-def has_x_account_connection(user_id: Union[int, str]) -> bool:
+def has_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None) -> bool:
     """
     Check if user has a valid X account connection that can be decrypted.
     
     Args:
         user_id: The Telegram user ID
+        pin: User's PIN for decryption (optional)
         
     Returns:
         True if user has a valid connection, False otherwise
@@ -237,9 +238,22 @@ def has_x_account_connection(user_id: Union[int, str]) -> bool:
         except Exception as e:
             logger.debug(f"Decryption without PIN failed for user {user_id_str}: {e}")
         
-        # If decryption without PIN fails, the data might require a PIN or be corrupted
-        # We'll return False to indicate the connection is not usable without proper decryption
-        logger.warning(f"X account record exists but cannot decrypt data for user {user_id_str}")
+        # If decryption without PIN fails, try with PIN if provided
+        if pin:
+            try:
+                test_decrypt = decrypt_data(encrypted_access_token, user_id, pin)
+                if test_decrypt:
+                    logger.debug(f"Successfully validated X connection (with PIN) for user {user_id_str}")
+                    return True
+                else:
+                    logger.warning(f"X account record exists but PIN decryption failed for user {user_id_str}")
+                    return False
+            except Exception as e:
+                logger.warning(f"Decryption with PIN failed for user {user_id_str}: {e}")
+                return False
+        
+        # If no PIN provided but data seems to require PIN, we can't validate
+        logger.debug(f"X account record exists but may require PIN for user {user_id_str}")
         return False
         
     except Exception as e:

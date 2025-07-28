@@ -79,9 +79,17 @@ async def x_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     user_id = update.effective_user.id
     
     try:
+        # Use PINManager to get the appropriate PIN for this user
+        from services.pin.PINManager import pin_manager
+        pin = pin_manager.get_pin(user_id) if pin_manager.needs_pin(user_id) else None
+        
+        # Update context with PIN if available (for consistency with pin_protected decorator)
+        if pin and context.user_data is not None:
+            context.user_data['pin'] = pin
+        
         # Check if user has an existing X connection with detailed logging
         logger.info(f"Checking X account connection for user {hash_user_id(user_id)}")
-        has_connection = has_x_account_connection(user_id)
+        has_connection = has_x_account_connection(user_id, pin)
         logger.info(f"Connection check result for user {hash_user_id(user_id)}: {has_connection}")
         
         # Create action buttons
@@ -194,9 +202,17 @@ async def x_command_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     
     try:
+        # Use PINManager to get the appropriate PIN for this user
+        from services.pin.PINManager import pin_manager
+        pin = pin_manager.get_pin(user_id) if pin_manager.needs_pin(user_id) else None
+        
+        # Update context with PIN if available
+        if pin and context.user_data is not None:
+            context.user_data['pin'] = pin
+        
         # Check if user has an existing X connection with detailed logging
         logger.info(f"Checking X account connection for user {hash_user_id(user_id)}")
-        has_connection = has_x_account_connection(user_id)
+        has_connection = has_x_account_connection(user_id, pin)
         logger.info(f"Connection check result for user {hash_user_id(user_id)}: {has_connection}")
         
         # Create action buttons
@@ -264,8 +280,9 @@ async def handle_x_connect(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id = query.message.chat_id if query.message else update.effective_chat.id
     
     try:
-        # Get user's PIN from context (should be available from pin_protected decorator)
-        pin = context.user_data.get('pin') if context.user_data else None
+        # Use PINManager to get the appropriate PIN for this user
+        from services.pin.PINManager import pin_manager
+        pin = pin_manager.get_pin(user_id) if pin_manager.needs_pin(user_id) else None
         
         # Create OAuth state with PIN
         state = create_oauth_state(user_id, chat_id, pin)
@@ -340,29 +357,26 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
     user_id = update.effective_user.id
     
     try:
-        # Get user's PIN from context (should be available from pin_protected decorator)
-        pin = context.user_data.get('pin') if context.user_data else None
+        # Use PINManager to get the appropriate PIN for this user
+        from services.pin.PINManager import pin_manager
+        pin = pin_manager.get_pin(user_id) if pin_manager.needs_pin(user_id) else None
         
-        # If no PIN in context but user needs one, we need to handle this gracefully
-        if not pin:
-            # Check if user actually needs a PIN
-            from services.pin.PINManager import pin_manager
-            if pin_manager.needs_pin(user_id):
-                # User needs PIN but we don't have it - should restart the command flow
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Restart /x Command", callback_data="x_retry")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await query.edit_message_text(
-                    "🔐 <b>PIN Required</b>\n\n"
-                    "Your account requires PIN verification to view X account details.\n"
-                    "Please restart the /x command to enter your PIN.",
-                    reply_markup=reply_markup,
-                    parse_mode='HTML'
-                )
-                return CHOOSING_X_ACTION
+        # If user needs PIN but we don't have a verified one, redirect to restart command
+        if pin_manager.needs_pin(user_id) and not pin:
+            keyboard = [
+                [InlineKeyboardButton("🔄 Restart /x Command", callback_data="x_retry")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="x_cancel")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "🔐 <b>PIN Required</b>\n\n"
+                "Your account requires PIN verification to view X account details.\n"
+                "Please restart the /x command to enter your PIN.",
+                reply_markup=reply_markup,
+                parse_mode='HTML'
+            )
+            return CHOOSING_X_ACTION
         
         # Get X account connection
         x_account = get_x_account_connection(user_id, pin)

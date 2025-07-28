@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional, Union, Tuple, TypedDict
 from db.pin import has_pin, verify_pin as db_verify_pin, save_user_pin
 from db.mnemonic import get_user_mnemonic, save_user_mnemonic
 from db.wallet import get_user_wallets_with_keys, save_user_wallet
+from db.x_account import get_x_account_connection, save_x_account_connection
 from db.utils import hash_user_id
 from utils.config import PIN_EXPIRATION_TIME
 from db.wallet import WalletData
@@ -161,12 +162,15 @@ class PINManager:
         Set a PIN for a user.
         """
         try:
-            # Must reencrypt mnemonic and private keys
+            # Must reencrypt mnemonic, private keys, and X account data
             old_pin: Optional[str] = None
             if self.has_pin(user_id):
                 old_pin = self.get_pin(user_id)
+            
+            # Get existing encrypted data with old PIN
             mnemonic: Optional[str] = get_user_mnemonic(user_id, old_pin)
             wallets_all: Dict[str, WalletData] = get_user_wallets_with_keys(user_id, old_pin)
+            x_account_data = get_x_account_connection(user_id, old_pin)
             
             # Save the PIN first
             save_user_pin(user_id, pin)
@@ -178,6 +182,22 @@ class PINManager:
             # Save each wallet with the new PIN
             for wallet_name, wallet_data in wallets_all.items():
                 save_user_wallet(user_id, dict(wallet_data), wallet_name, pin)
+            
+            # Save X account data with the new PIN if it exists
+            if x_account_data:
+                logger.info(f"Re-encrypting X account data with new PIN for user {hash_user_id(user_id)}")
+                save_x_account_connection(
+                    user_id=user_id,
+                    x_user_id=x_account_data.get('x_user_id'),
+                    x_username=x_account_data.get('x_username'),
+                    access_token=x_account_data.get('access_token'),
+                    refresh_token=x_account_data.get('refresh_token'),
+                    token_expires_at=x_account_data.get('token_expires_at'),
+                    scope=x_account_data.get('scope', 'tweet.read users.read follows.read like.read'),
+                    x_display_name=x_account_data.get('x_display_name'),
+                    x_profile_image_url=x_account_data.get('x_profile_image_url'),
+                    pin=pin
+                )
             
             # Store the PIN in the PIN manager
             self._store_pin(user_id, pin)
