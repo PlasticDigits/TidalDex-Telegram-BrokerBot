@@ -286,8 +286,8 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
         logger.debug(f"Modified query: {pg_query}")
         
         # Identify boolean columns and convert integer parameters (0/1) to boolean values
-        # Look for column names like "is_", "has_".
-        boolean_column_names = ["is_", "has_"]
+        # Use specific known boolean columns from our database schema
+        known_boolean_columns = ['is_active', 'is_imported']
         boolean_column_indices = []
         
         # Identify boolean columns in the query
@@ -299,7 +299,7 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
                 column_list = [c.strip() for c in pg_query[col_start:col_end].split(',')]
                 # Find indices of boolean columns
                 for i, col in enumerate(column_list):
-                    if any(bool_name in col.lower() for bool_name in boolean_column_names):
+                    if col.strip().lower() in known_boolean_columns:
                         boolean_column_indices.append(i)
                         logger.debug(f"Identified boolean column: {col} at index {i}")
         # For UPDATE queries with boolean columns
@@ -315,8 +315,8 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
                 for i, assignment in enumerate(field_assignments):
                     if '=' in assignment:
                         field_name = assignment.split('=')[0].strip()
-                        # Check if this is a boolean field
-                        if any(bool_name in field_name.lower() for bool_name in boolean_column_names):
+                        # Check if this is a known boolean field
+                        if field_name.lower() in known_boolean_columns:
                             boolean_column_indices.append(parameter_idx)
                             logger.debug(f"Identified boolean UPDATE column: {field_name} at parameter index {parameter_idx}")
                     # Each assignment typically uses one parameter

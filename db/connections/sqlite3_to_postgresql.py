@@ -162,17 +162,33 @@ class SQLiteToPostgreSQLConverter:
         # Only convert standalone 0/1 values, not those that might be used for integer columns
         # For example, convert "WHERE active = 0" but not "DEFAULT 0" for integer columns
         
-        # More selective boolean conversion - only convert in WHERE clauses and boolean contexts
-        # Look for patterns like "column = 0" or "column = 1" in WHERE clauses
+        # More selective boolean conversion - only convert specific known boolean columns
+        # Define the actual boolean columns from our database schema
+        known_boolean_columns = ['is_active', 'is_imported']
+        
+        # Convert 0/1 to boolean values only for known boolean columns
         if re.search(r'WHERE\s', sql, re.IGNORECASE):
-            # Convert 0/1 in WHERE clauses and boolean operators
-            # Look for patterns like "column = 0" or "column IS 1"
-            sql = re.sub(r'(\s*=\s*|\s+IS\s+)0(\s+|$|\))', r'\1false\2', sql, flags=re.IGNORECASE)
-            sql = re.sub(r'(\s*=\s*|\s+IS\s+)1(\s+|$|\))', r'\1true\2', sql, flags=re.IGNORECASE)
-            
-            # Also handle boolean operators like AND, OR
-            sql = re.sub(r'(\s+AND\s+|\s+OR\s+|\s+NOT\s+)0(\s+|$|\))', r'\1false\2', sql, flags=re.IGNORECASE)
-            sql = re.sub(r'(\s+AND\s+|\s+OR\s+|\s+NOT\s+)1(\s+|$|\))', r'\1true\2', sql, flags=re.IGNORECASE)
+            for col_name in known_boolean_columns:
+                # Convert 0 to false for specific boolean columns
+                sql = re.sub(
+                    rf'(\s+{re.escape(col_name)}\s*=\s*)0(\s+|$|\)|,)', 
+                    r'\1false\2', 
+                    sql, 
+                    flags=re.IGNORECASE
+                )
+                # Convert 1 to true for specific boolean columns  
+                sql = re.sub(
+                    rf'(\s+{re.escape(col_name)}\s*=\s*)1(\s+|$|\)|,)', 
+                    r'\1true\2', 
+                    sql, 
+                    flags=re.IGNORECASE
+                )
+        
+        # Handle INSERT statements with boolean columns
+        if re.search(r'INSERT\s+INTO\s+wallets', sql, re.IGNORECASE):
+            # For wallets table, convert the boolean column values
+            # This needs to be done carefully to match the exact positions
+            pass  # We'll handle this in the postgresql.py execute_query function instead
         
         # Convert PRAGMA statements
         sql = SQLiteToPostgreSQLConverter._convert_pragma(sql)
