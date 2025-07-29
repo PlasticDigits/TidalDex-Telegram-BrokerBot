@@ -16,7 +16,7 @@ from utils.config import X_CLIENT_ID, X_CLIENT_SECRET, X_REDIRECT_URI, X_SCOPES
 from services.api import create_oauth_state, get_oauth_state_data, cleanup_oauth_state
 from services.pin import pin_protected
 from db import (
-    save_x_account_connection, get_x_account_connection, 
+    save_x_account_connection, get_x_account_connection_with_fresh_followers, 
     delete_x_account_connection, has_x_account_connection,
     cleanup_corrupted_x_account,
 )
@@ -379,7 +379,7 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
             return CHOOSING_X_ACTION
         
         # Get X account connection
-        x_account = get_x_account_connection(user_id, pin)
+        x_account = await get_x_account_connection_with_fresh_followers(user_id, pin)
         
         if not x_account:
             # Check if there's a corrupted record
@@ -410,11 +410,25 @@ async def handle_x_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> s
         connected_at = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(x_account.get('connected_at', 0)))
         last_updated = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(x_account.get('last_updated', 0)))
         
+        # Format follower info
+        follower_count = x_account.get('follower_count')
+        follower_fetched_at = x_account.get('follower_fetched_at')
+        
+        follower_info = ""
+        if follower_count is not None:
+            follower_info = f"👥 <b>Followers:</b> {follower_count:,}\n"
+            if follower_fetched_at:
+                follower_last_updated = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(follower_fetched_at))
+                follower_info += f"📊 <b>Follower Data Updated:</b> {follower_last_updated}\n"
+        else:
+            follower_info = "👥 <b>Followers:</b> Not available\n"
+        
         message_text = (
             f"🐦 <b>Connected X Account</b>\n\n"
             f"👤 <b>Username:</b> @{x_account.get('x_username', 'Unknown')}\n"
             f"📝 <b>Display Name:</b> {x_account.get('x_display_name', 'Not provided')}\n"
             f"🆔 <b>User ID:</b> {x_account.get('x_user_id', 'Unknown')}\n"
+            f"{follower_info}"
             f"🔐 <b>Scopes:</b> {x_account.get('scope', 'Unknown')}\n"
             f"📅 <b>Connected:</b> {connected_at}\n"
             f"🔄 <b>Last Updated:</b> {last_updated}\n\n"
@@ -754,7 +768,7 @@ async def exchange_oauth_code(
             }
             
             response = await client.get(
-                'https://api.twitter.com/2/users/me?user.fields=id,username,name,profile_image_url',
+                'https://api.twitter.com/2/users/me?user.fields=id,username,name,profile_image_url,public_metrics',
                 headers=headers
             )
             
@@ -767,6 +781,11 @@ async def exchange_oauth_code(
             x_user_info = user_data.get('data', {})
             logger.info(f"User info from X API: {response.json()}")
             logger.info(f"User info from X API: {x_user_info}")
+            
+            # Extract follower count from public metrics
+            public_metrics = x_user_info.get('public_metrics', {})
+            follower_count = public_metrics.get('followers_count')
+            current_time = int(time.time())
         
         # Get user's PIN from OAuth state data instead of context
         state_data = get_oauth_state_data(state)
@@ -783,7 +802,9 @@ async def exchange_oauth_code(
             scope=X_SCOPES,
             x_display_name=x_user_info.get('name'),
             x_profile_image_url=x_user_info.get('profile_image_url'),
-            pin=pin
+            pin=pin,
+            follower_count=follower_count,
+            follower_fetched_at=current_time if follower_count is not None else None
         )
         
         # Clean up the code verifier

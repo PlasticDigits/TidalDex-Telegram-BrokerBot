@@ -258,7 +258,16 @@ def init_db() -> bool:
             scope TEXT NOT NULL,
             connected_at INTEGER NOT NULL,
             last_updated INTEGER NOT NULL,
+            follower_count INTEGER,
+            follower_fetched_at INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        
+        -- Application table for version management and instance control
+        CREATE TABLE IF NOT EXISTS application (
+            id INTEGER PRIMARY KEY,
+            version INTEGER NOT NULL,
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
         );
     '''
     
@@ -354,18 +363,43 @@ def init_db() -> bool:
             scope TEXT NOT NULL,
             connected_at INTEGER NOT NULL,
             last_updated INTEGER NOT NULL,
+            follower_count INTEGER,
+            follower_fetched_at INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        
+        -- Application table for version management and instance control
+        CREATE TABLE IF NOT EXISTS application (
+            id INTEGER PRIMARY KEY,
+            version INTEGER NOT NULL,
+            updated_at INTEGER DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::INTEGER
         );
     '''
         
     if DB_TYPE == 'sqlite3':
-        return cast(bool, db_module.init_db(DB_PATH, sqlite_init_script))
+        result = cast(bool, db_module.init_db(DB_PATH, sqlite_init_script))
+        if result:
+            # Run X accounts table migration after successful initialization
+            try:
+                from db.x_account import migrate_x_accounts_table
+                migrate_x_accounts_table()
+            except Exception as e:
+                logger.warning(f"Error running X accounts migration: {e}")
+        return result
     else:  # postgresql
         if not hasattr(db_module, 'POSTGRESQL_AVAILABLE') or not db_module.POSTGRESQL_AVAILABLE:
             logger.error("PostgreSQL support is not available. Please install psycopg2 with 'pip install psycopg2-binary'")
             return False
         # For PostgreSQL, use the PostgreSQL-specific script
-        return cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, postgres_init_script))
+        result = cast(bool, db_module.init_db(DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, postgres_init_script))
+        if result:
+            # Run X accounts table migration after successful initialization
+            try:
+                from db.x_account import migrate_x_accounts_table
+                migrate_x_accounts_table()
+            except Exception as e:
+                logger.warning(f"Error running X accounts migration: {e}")
+        return result
 
 # Make functions from the underlying database module available
 retry_on_db_lock: Optional[Callable[[int, float], Callable[[F], F]]] = getattr(db_module, 'retry_on_db_lock', None) if DB_TYPE == 'sqlite3' else None

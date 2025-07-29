@@ -26,6 +26,8 @@ from services.pin import handle_pin_input
 import db
 # Import FastAPI server
 from services.api import run_api_server
+# Import version manager
+from services.version import version_manager
 
 # Import command handlers from commands package
 from commands.start import start
@@ -154,6 +156,12 @@ def graceful_shutdown(signum: int, frame) -> None:
     except Exception as e:
         logger.error(f"Error closing database: {e}")
     
+    # Clean up version manager
+    try:
+        version_manager.cleanup_version()
+    except Exception as e:
+        logger.error(f"Error cleaning up version manager: {e}")
+    
     logger.info("Graceful shutdown completed")
     # Use os._exit to force exit
     os._exit(0)
@@ -196,6 +204,19 @@ def main() -> None:
             return
     except Exception as e:
         logger.error(f"Database test failed: {e}")
+        logger.error(traceback.format_exc())
+        return
+    
+    # Initialize application version
+    try:
+        logger.info("Initializing application version...")
+        if not version_manager.initialize_version():
+            logger.error("Failed to initialize application version. Exiting.")
+            return
+        current_version = version_manager.get_current_version()
+        logger.info(f"Application version initialized: {current_version}")
+    except Exception as e:
+        logger.error(f"Version initialization failed: {e}")
         logger.error(traceback.format_exc())
         return
     
@@ -480,7 +501,15 @@ def main() -> None:
         )
     except Exception as e:
         if "Conflict" in str(e) and "getUpdates" in str(e):
-            logger.warning("Bot conflict detected - another instance may be running. Waiting before retry...")
+            logger.warning("Bot conflict detected - another instance may be running. Checking version...")
+            
+            # Check if this instance's version is still current
+            if not version_manager.is_version_current():
+                logger.warning("Version check failed - another instance has started. Shutting down gracefully.")
+                graceful_shutdown(signal.SIGUSR1, None)
+                return
+            
+            logger.info("Version check passed. Waiting before retry...")
             time.sleep(15)  # Wait 15 seconds before potential restart
             if not shutdown_event.is_set():
                 logger.info("Retrying bot startup...")
@@ -492,9 +521,23 @@ def main() -> None:
                     )
                 except Exception as retry_e:
                     logger.error(f"Retry failed: {retry_e}")
+                    
+                    # Check version again on retry failure
+                    if not version_manager.is_version_current():
+                        logger.warning("Version check failed on retry - another instance has started. Shutting down gracefully.")
+                        graceful_shutdown(signal.SIGUSR1, None)
+                        return
+                    
                     raise
         else:
             logger.error(f"Bot polling failed: {e}")
+            
+            # Check version on any polling failure
+            if not version_manager.is_version_current():
+                logger.warning("Version check failed after polling error - another instance has started. Shutting down gracefully.")
+                graceful_shutdown(signal.SIGUSR1, None)
+                return
+            
             raise
 
     return

@@ -8,9 +8,51 @@ from db.connections.connection import QueryResult
 from db.connection import execute_query
 from db.utils import encrypt_data, decrypt_data, hash_user_id
 import time
+import httpx
 
 # Configure module logger
 logger = logging.getLogger(__name__)
+
+async def refetch_follower_count(access_token: str) -> Optional[int]:
+    """
+    Refetch follower count from X API.
+    
+    Args:
+        access_token: Valid X API access token
+        
+    Returns:
+        Follower count or None if failed
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = await client.get(
+                'https://api.twitter.com/2/users/me?user.fields=public_metrics',
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch follower count from X API: {response.status_code}")
+                return None
+            
+            user_data = response.json()
+            public_metrics = user_data.get('data', {}).get('public_metrics', {})
+            follower_count = public_metrics.get('followers_count')
+            
+            if follower_count is not None:
+                logger.info(f"Successfully fetched follower count: {follower_count}")
+                return int(follower_count)
+            else:
+                logger.error("No follower count found in X API response")
+                return None
+                
+    except Exception as e:
+        logger.error(f"Error refetching follower count: {e}")
+        return None
 
 # Define TypedDict for X account data
 class XAccountData(TypedDict, total=False):
@@ -26,6 +68,8 @@ class XAccountData(TypedDict, total=False):
     scope: str
     connected_at: int
     last_updated: int
+    follower_count: Optional[int]
+    follower_fetched_at: Optional[int]
 
 def save_x_account_connection(
     user_id: Union[int, str],
@@ -37,7 +81,9 @@ def save_x_account_connection(
     scope: str = "tweet.read users.read follows.read like.read",
     x_display_name: Optional[str] = None,
     x_profile_image_url: Optional[str] = None,
-    pin: Optional[str] = None
+    pin: Optional[str] = None,
+    follower_count: Optional[int] = None,
+    follower_fetched_at: Optional[int] = None
 ) -> bool:
     """
     Save or update X account connection for a user.
@@ -53,6 +99,8 @@ def save_x_account_connection(
         x_display_name: X display name (optional)
         x_profile_image_url: X profile image URL (optional)
         pin: User PIN for encryption
+        follower_count: X account follower count (optional)
+        follower_fetched_at: Timestamp when follower count was fetched (optional)
         
     Returns:
         True if successful, False otherwise
@@ -81,11 +129,13 @@ def save_x_account_connection(
                 """
                 UPDATE x_accounts SET 
                     x_user_id = ?, x_username = ?, x_display_name = ?, x_profile_image_url = ?,
-                    access_token = ?, refresh_token = ?, token_expires_at = ?, scope = ?, last_updated = ?
+                    access_token = ?, refresh_token = ?, token_expires_at = ?, scope = ?, last_updated = ?,
+                    follower_count = ?, follower_fetched_at = ?
                 WHERE user_id = ?
                 """,
                 (x_user_id, x_username, x_display_name, x_profile_image_url,
-                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, user_id_str)
+                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time,
+                 follower_count, follower_fetched_at, user_id_str)
             )
         else:
             # Insert new connection
@@ -94,11 +144,13 @@ def save_x_account_connection(
                 """
                 INSERT INTO x_accounts 
                 (user_id, x_user_id, x_username, x_display_name, x_profile_image_url, 
-                 access_token, refresh_token, token_expires_at, scope, connected_at, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 access_token, refresh_token, token_expires_at, scope, connected_at, last_updated,
+                 follower_count, follower_fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (user_id_str, x_user_id, x_username, x_display_name, x_profile_image_url,
-                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time)
+                 encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time,
+                 follower_count, follower_fetched_at)
             )
         
         return result is not None
@@ -169,6 +221,58 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
         logger.error(f"Error getting X account connection for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
         return None
+
+async def get_x_account_connection_with_fresh_followers(user_id: Union[int, str], pin: Optional[str] = None) -> Optional[XAccountData]:
+    """
+    Get X account connection for a user and refresh follower data if needed.
+    
+    Args:
+        user_id: The Telegram user ID
+        pin: User PIN for decryption
+        
+    Returns:
+        X account data with fresh follower data or None if not found
+    """
+    user_id_str: str = hash_user_id(user_id)
+    
+    # Get the basic account data first
+    x_account_data = get_x_account_connection(user_id, pin)
+    if not x_account_data:
+        return None
+    
+    # Check if follower data needs refreshing (7 days = 604800 seconds)
+    current_time = int(time.time())
+    follower_fetched_at = x_account_data.get('follower_fetched_at')
+    
+    if (follower_fetched_at is None or 
+        current_time - follower_fetched_at > 604800):  # 7 days in seconds
+        
+        logger.info(f"Follower data expired for user {user_id_str}, refetching...")
+        
+        try:
+            # Refetch follower count
+            new_follower_count = await refetch_follower_count(x_account_data['access_token'])
+            
+            if new_follower_count is not None:
+                # Update the database with new follower data
+                logger.info(f"Updating follower count for user {user_id_str}: {new_follower_count}")
+                
+                execute_query(
+                    "UPDATE x_accounts SET follower_count = ?, follower_fetched_at = ?, last_updated = ? WHERE user_id = ?",
+                    (new_follower_count, current_time, current_time, user_id_str)
+                )
+                
+                # Update the returned data
+                x_account_data['follower_count'] = new_follower_count
+                x_account_data['follower_fetched_at'] = current_time
+                x_account_data['last_updated'] = current_time
+            else:
+                logger.warning(f"Failed to refetch follower count for user {user_id_str}")
+                
+        except Exception as e:
+            logger.error(f"Error refetching follower count for user {user_id_str}: {e}")
+    
+    return x_account_data
 
 def delete_x_account_connection(user_id: Union[int, str]) -> bool:
     """
@@ -295,14 +399,61 @@ def cleanup_corrupted_x_account(user_id: Union[int, str]) -> bool:
         logger.error(traceback.format_exc())
         return False
 
-def create_x_accounts_table() -> bool:
+def migrate_x_accounts_table() -> bool:
     """
-    Create the x_accounts table if it doesn't exist.
+    Migrate the x_accounts table to add follower columns if they don't exist.
     
     Returns:
         True if successful, False otherwise
     """
     try:
+        # Check if follower_count column exists
+        result = execute_query("PRAGMA table_info(x_accounts)", fetch='all')
+        
+        # If result is None or empty, table doesn't exist
+        if not result:
+            logger.info("x_accounts table doesn't exist, will be created with new schema")
+            return True
+        
+        # Check if follower columns already exist
+        columns = [row['name'] if isinstance(row, dict) else row[1] for row in result]
+        has_follower_count = 'follower_count' in columns
+        has_follower_fetched_at = 'follower_fetched_at' in columns
+        
+        if has_follower_count and has_follower_fetched_at:
+            logger.info("X accounts table already has follower columns")
+            return True
+        
+        # Add missing columns
+        if not has_follower_count:
+            logger.info("Adding follower_count column to x_accounts table")
+            execute_query("ALTER TABLE x_accounts ADD COLUMN follower_count INTEGER")
+        
+        if not has_follower_fetched_at:
+            logger.info("Adding follower_fetched_at column to x_accounts table")
+            execute_query("ALTER TABLE x_accounts ADD COLUMN follower_fetched_at INTEGER")
+        
+        logger.info("Successfully migrated x_accounts table")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error migrating x_accounts table: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+def create_x_accounts_table() -> bool:
+    """
+    Create the x_accounts table if it doesn't exist and migrate existing tables.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # First run migration to add columns to existing tables
+        if not migrate_x_accounts_table():
+            logger.error("Failed to migrate x_accounts table")
+            return False
+        
         # SQLite table creation
         sqlite_sql = """
         CREATE TABLE IF NOT EXISTS x_accounts (
@@ -317,12 +468,14 @@ def create_x_accounts_table() -> bool:
             scope TEXT NOT NULL,
             connected_at INTEGER NOT NULL,
             last_updated INTEGER NOT NULL,
+            follower_count INTEGER,
+            follower_fetched_at INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
         """
         
         result = execute_query(sqlite_sql)
-        logger.info("X accounts table created successfully")
+        logger.info("X accounts table created/verified successfully")
         return result is not None
         
     except Exception as e:

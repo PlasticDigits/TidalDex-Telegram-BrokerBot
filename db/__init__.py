@@ -36,8 +36,9 @@ from db.pin_attempt import (
 
 # Import X account operations
 from db.x_account import (
-    save_x_account_connection, get_x_account_connection, delete_x_account_connection,
-    has_x_account_connection, create_x_accounts_table, XAccountData, cleanup_corrupted_x_account
+    save_x_account_connection, get_x_account_connection, get_x_account_connection_with_fresh_followers,
+    delete_x_account_connection, has_x_account_connection, create_x_accounts_table, XAccountData, cleanup_corrupted_x_account,
+    migrate_x_accounts_table
 )
 
 # Import types
@@ -70,8 +71,9 @@ __all__ = [
     'increment_pin_attempt',
     
     # X account operations
-    'save_x_account_connection', 'get_x_account_connection',
-    'has_x_account_connection', 'create_x_accounts_table', 'XAccountData',
+    'save_x_account_connection', 'get_x_account_connection', 'get_x_account_connection_with_fresh_followers',
+    'delete_x_account_connection', 'has_x_account_connection', 'cleanup_corrupted_x_account', 
+    'create_x_accounts_table', 'migrate_x_accounts_table', 'XAccountData',
     
     # Type definitions
     'QueryResult',
