@@ -195,6 +195,7 @@ def decrypt_address(encrypted_address: str, user_id: Union[int, str], pin: Optio
 def get_address_for_storage_and_retrieval(address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Tuple[Optional[str], bool]:
     """
     Handle address encryption for storage, with backwards compatibility support.
+    Also handles migration scenarios where addresses may be encrypted with or without PIN.
     
     Args:
         address: The address (could be plain text or encrypted)
@@ -209,8 +210,23 @@ def get_address_for_storage_and_retrieval(address: str, user_id: Union[int, str]
     
     # Check if address is already encrypted
     if is_data_encrypted(address):
-        # Already encrypted, return as-is
-        return address, True
+        # Try to decrypt to validate it's a valid encrypted address
+        # First try with PIN (normal case)
+        if pin:
+            decrypted = decrypt_address(address, user_id, pin)
+            if decrypted:
+                # Valid encrypted address with PIN, return as-is
+                return address, True
+        
+        # Try without PIN (migration case)
+        decrypted_no_pin = decrypt_address(address, user_id, None)
+        if decrypted_no_pin:
+            # Valid encrypted address without PIN, return as-is
+            return address, True
+        
+        # If we can't decrypt it with either method, it may be corrupted
+        logger.warning(f"Found encrypted address that cannot be decrypted for user {hash_user_id(user_id)}")
+        return address, True  # Still treat as encrypted, but may be problematic
     
     # Plain text address, encrypt it
     encrypted = encrypt_address(address, user_id, pin)
@@ -219,6 +235,7 @@ def get_address_for_storage_and_retrieval(address: str, user_id: Union[int, str]
 def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """
     Get address for display, handling both encrypted and plain text addresses.
+    Also handles addresses encrypted during migration (without PIN) vs normal operation (with PIN).
     
     Args:
         stored_address: The address as stored in database
@@ -233,8 +250,21 @@ def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: 
     
     # Check if address is encrypted
     if is_data_encrypted(stored_address):
-        # Decrypt it
-        return decrypt_address(stored_address, user_id, pin)
+        # Try to decrypt with PIN first (normal case)
+        if pin:
+            decrypted = decrypt_address(stored_address, user_id, pin)
+            if decrypted:
+                return decrypted
+        
+        # If PIN decryption failed or no PIN, try without PIN (migration case)
+        decrypted_no_pin = decrypt_address(stored_address, user_id, None)
+        if decrypted_no_pin:
+            logger.debug(f"Successfully decrypted address without PIN for user {hash_user_id(user_id)} (migration case)")
+            return decrypted_no_pin
+        
+        # If both attempts failed, log the error
+        logger.error(f"Failed to decrypt address for user {hash_user_id(user_id)} with both PIN and without PIN")
+        return None
     else:
         # Plain text, return as-is (backwards compatibility)
         return stored_address
