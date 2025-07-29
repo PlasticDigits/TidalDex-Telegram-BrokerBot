@@ -8,6 +8,7 @@ import signal
 import time
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 from telegram import Update
+from telegram.error import Conflict
 import traceback
 
 from warnings import filterwarnings
@@ -474,9 +475,30 @@ def main() -> None:
         # Log the error before we do anything else
         logger.error("Exception while handling an update:", exc_info=context.error)
         
-        # Send an error message
+        # Check if this is a Conflict error indicating another bot instance
+        if isinstance(context.error, Conflict):
+            logger.warning("Telegram Conflict error detected - checking if another instance has started...")
+            
+            # Check if this instance's version is still current
+            if not version_manager.is_version_current():
+                logger.warning("Version check failed during error handling - another instance has started. Shutting down gracefully.")
+                # Schedule graceful shutdown
+                def shutdown_task():
+                    graceful_shutdown(signal.SIGUSR1, None)
+                
+                # Run shutdown in a thread to avoid blocking the async context
+                shutdown_thread = threading.Thread(target=shutdown_task, daemon=True)
+                shutdown_thread.start()
+                return
+            else:
+                logger.info("Version check passed - this instance is still current. Conflict may be temporary.")
+        
+        # Send an error message for non-conflict errors or if version is still current
         if update and hasattr(update, 'effective_message') and update.effective_message:
-            await update.effective_message.reply_text('An error occurred while processing your request.')
+            try:
+                await update.effective_message.reply_text('An error occurred while processing your request.')
+            except Exception as e:
+                logger.error(f"Failed to send error message to user: {e}")
     
     application.add_error_handler(error_handler)
     
