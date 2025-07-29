@@ -281,9 +281,8 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
         from db.connections.sqlite3_to_postgresql import convert_sql
         pg_query = convert_sql(query)
         
-        # Replace ? with %s for psycopg2 (it will handle the conversion to $1, $2 internally)
-        pg_query = pg_query.replace('?', '%s')
-        logger.debug(f"Modified query: {pg_query}")
+        # Parameter conversion is now handled in sqlite3_to_postgresql.py
+        logger.debug(f"Converted query: {pg_query}")
         
         # Identify boolean columns and convert integer parameters (0/1) to boolean values
         # Use specific known boolean columns from our database schema

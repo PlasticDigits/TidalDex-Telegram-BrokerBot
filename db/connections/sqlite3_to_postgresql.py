@@ -89,8 +89,8 @@ class SQLiteToPostgreSQLConverter:
                 sql = sql.rstrip(';')
                 sql += " ON CONFLICT DO NOTHING;"
         
-        # Convert SQLite parameter placeholders (?) to PostgreSQL placeholders ($1, $2, etc.)
-        param_count = 1
+        # Convert SQLite parameter placeholders (?) to psycopg2 placeholders (%s)
+        # psycopg2 handles the parameter substitution internally
         processed_sql = ""
         
         # Process SQL one character at a time to handle ? placeholders safely
@@ -111,9 +111,8 @@ class SQLiteToPostgreSQLConverter:
                     string_char = None
                 processed_sql += char
             elif char == '?' and not in_string:
-                # Replace ? with $N, but only if it's not in a string
-                processed_sql += f"${param_count}"
-                param_count += 1
+                # Replace ? with %s for psycopg2, but only if it's not in a string
+                processed_sql += "%s"
             else:
                 processed_sql += char
             
