@@ -134,6 +134,111 @@ def decrypt_data(encrypted_data: str, user_id: Union[int, str], pin: Optional[st
         logger.error(traceback.format_exc())
         return None
 
+def is_data_encrypted(data: str) -> bool:
+    """
+    Check if data appears to be encrypted (base64-encoded with salt).
+    
+    Args:
+        data: The data to check
+        
+    Returns:
+        True if data appears encrypted, False otherwise
+    """
+    if not data:
+        return False
+    
+    try:
+        # Encrypted data should be base64-encoded
+        decoded = base64.b64decode(data)
+        # Should have at least 16 bytes for salt + some encrypted content
+        return len(decoded) > 16
+    except Exception:
+        # If base64 decoding fails, it's likely plain text
+        return False
+
+def encrypt_address(address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
+    """
+    Encrypt a wallet address using the same encryption as other sensitive data.
+    
+    Args:
+        address: The wallet address to encrypt
+        user_id: User identifier for key derivation
+        pin: User's PIN for additional security
+        
+    Returns:
+        Encrypted address or None if encryption fails
+    """
+    if not address:
+        return None
+    
+    # Use the same encryption as private keys
+    return encrypt_data(address, user_id, pin)
+
+def decrypt_address(encrypted_address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
+    """
+    Decrypt a wallet address.
+    
+    Args:
+        encrypted_address: The encrypted address
+        user_id: User identifier for key derivation
+        pin: User's PIN for additional security
+        
+    Returns:
+        Decrypted address or None if decryption fails
+    """
+    if not encrypted_address:
+        return None
+    
+    # Use the same decryption as private keys
+    return decrypt_data(encrypted_address, user_id, pin)
+
+def get_address_for_storage_and_retrieval(address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Tuple[Optional[str], bool]:
+    """
+    Handle address encryption for storage, with backwards compatibility support.
+    
+    Args:
+        address: The address (could be plain text or encrypted)
+        user_id: User identifier
+        pin: User's PIN
+        
+    Returns:
+        Tuple of (processed_address, was_encrypted)
+    """
+    if not address:
+        return None, False
+    
+    # Check if address is already encrypted
+    if is_data_encrypted(address):
+        # Already encrypted, return as-is
+        return address, True
+    
+    # Plain text address, encrypt it
+    encrypted = encrypt_address(address, user_id, pin)
+    return encrypted, False
+
+def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
+    """
+    Get address for display, handling both encrypted and plain text addresses.
+    
+    Args:
+        stored_address: The address as stored in database
+        user_id: User identifier
+        pin: User's PIN
+        
+    Returns:
+        Plain text address for display
+    """
+    if not stored_address:
+        return None
+    
+    # Check if address is encrypted
+    if is_data_encrypted(stored_address):
+        # Decrypt it
+        return decrypt_address(stored_address, user_id, pin)
+    else:
+        # Plain text, return as-is (backwards compatibility)
+        return stored_address
+
 def hash_user_id(user_id: Union[int, str]) -> str:
     """
     Create an irreversible hash of a user ID for database storage.
@@ -169,4 +274,177 @@ def hash_pin(pin: str) -> str:
     # Create SHA-256 hash
     hashed: str = hashlib.sha256(pin_str).hexdigest()
     
-    return hashed 
+    return hashed
+
+def migrate_wallet_addresses() -> Tuple[bool, str]:
+    """
+    Migrate existing plain-text wallet addresses to encrypted format.
+    
+    This function handles backwards compatibility by:
+    1. Finding all wallets with plain-text addresses
+    2. Encrypting them with the user's PIN (if available)
+    3. Updating the database with encrypted addresses
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        from db.connection import execute_query
+        from db.pin import has_pin
+        from services.pin.PINManager import pin_manager
+        
+        logger.info("Starting wallet address migration...")
+        
+        # Get all wallets
+        all_wallets = execute_query(
+            "SELECT id, user_id, address, name FROM wallets",
+            fetch='all'
+        )
+        
+        if not all_wallets or not isinstance(all_wallets, list):
+            return True, "No wallets found to migrate"
+        
+        migrated_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for wallet in all_wallets:
+            if not isinstance(wallet, dict):
+                continue
+                
+            wallet_id = wallet.get('id')
+            user_id_str = wallet.get('user_id')
+            stored_address = wallet.get('address')
+            wallet_name = wallet.get('name', 'Unknown')
+            
+            if not wallet_id or not user_id_str or not stored_address:
+                continue
+            
+            # Check if address is already encrypted
+            if is_data_encrypted(stored_address):
+                skipped_count += 1
+                logger.debug(f"Skipping already encrypted address for wallet {wallet_name}")
+                continue
+            
+            try:
+                # Try to get the original user ID from the hash (not possible, so we'll work with hashed ID)
+                # We need to determine if the user has a PIN
+                pin = None
+                
+                # Check if user has a PIN in the database
+                if has_pin(user_id_str):
+                    # Try to get PIN from PINManager if user is currently active
+                    # Note: This migration should ideally be run when users are not active
+                    # or we should prompt for PIN during migration
+                    logger.warning(f"User {user_id_str[:10]}... has PIN but migration cannot access it. Address will be encrypted without PIN.")
+                
+                # Encrypt the address
+                encrypted_address = encrypt_address(stored_address, user_id_str, pin)
+                
+                if encrypted_address:
+                    # Update the database
+                    execute_query(
+                        "UPDATE wallets SET address = ? WHERE id = ?",
+                        (encrypted_address, wallet_id)
+                    )
+                    migrated_count += 1
+                    logger.debug(f"Migrated address for wallet {wallet_name} (user {user_id_str[:10]}...)")
+                else:
+                    logger.error(f"Failed to encrypt address for wallet {wallet_name}")
+                    error_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Error migrating wallet {wallet_name}: {e}")
+                error_count += 1
+        
+        message = f"Migration completed: {migrated_count} addresses encrypted, {skipped_count} already encrypted, {error_count} errors"
+        logger.info(message)
+        
+        return error_count == 0, message
+        
+    except Exception as e:
+        error_msg = f"Migration failed with error: {e}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        return False, error_msg
+
+def migrate_user_wallet_addresses(user_id: Union[int, str], pin: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Migrate wallet addresses for a specific user.
+    
+    This is useful for migrating addresses when a user logs in and provides their PIN.
+    
+    Args:
+        user_id: The user ID (will be hashed for database lookup)
+        pin: The user's PIN for encryption
+        
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        from db.connection import execute_query
+        
+        user_id_str = hash_user_id(user_id)
+        logger.info(f"Starting wallet address migration for user {user_id_str[:10]}...")
+        
+        # Get all wallets for this user
+        user_wallets = execute_query(
+            "SELECT id, address, name FROM wallets WHERE user_id = ?",
+            (user_id_str,),
+            fetch='all'
+        )
+        
+        if not user_wallets or not isinstance(user_wallets, list):
+            return True, "No wallets found for user"
+        
+        migrated_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for wallet in user_wallets:
+            if not isinstance(wallet, dict):
+                continue
+                
+            wallet_id = wallet.get('id')
+            stored_address = wallet.get('address')
+            wallet_name = wallet.get('name', 'Unknown')
+            
+            if not wallet_id or not stored_address:
+                continue
+            
+            # Check if address is already encrypted
+            if is_data_encrypted(stored_address):
+                skipped_count += 1
+                logger.debug(f"Skipping already encrypted address for wallet {wallet_name}")
+                continue
+            
+            try:
+                # Encrypt the address with the user's PIN
+                encrypted_address = encrypt_address(stored_address, user_id, pin)
+                
+                if encrypted_address:
+                    # Update the database
+                    execute_query(
+                        "UPDATE wallets SET address = ? WHERE id = ?",
+                        (encrypted_address, wallet_id)
+                    )
+                    migrated_count += 1
+                    logger.debug(f"Migrated address for wallet {wallet_name}")
+                else:
+                    logger.error(f"Failed to encrypt address for wallet {wallet_name}")
+                    error_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Error migrating wallet {wallet_name}: {e}")
+                error_count += 1
+        
+        message = f"User migration completed: {migrated_count} addresses encrypted, {skipped_count} already encrypted, {error_count} errors"
+        logger.info(message)
+        
+        return error_count == 0, message
+        
+    except Exception as e:
+        error_msg = f"User migration failed with error: {e}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        return False, error_msg 

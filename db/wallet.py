@@ -6,7 +6,7 @@ import traceback
 from typing import Optional, Union, Dict, Any, List, Tuple, TypedDict, cast
 from db.connections.connection import QueryResult
 from db.connection import execute_query
-from db.utils import encrypt_data, decrypt_data, hash_user_id
+from db.utils import encrypt_data, decrypt_data, hash_user_id, encrypt_address, decrypt_address, get_address_for_display, get_address_for_storage_and_retrieval, is_data_encrypted
 from db.mnemonic import get_user_mnemonic
 from wallet.mnemonic import derive_wallet_from_mnemonic
 import time
@@ -72,8 +72,25 @@ def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None,
                 logger.debug(f"No active wallet found for user: {user_id_str}")
             return None
         
-        # Decrypt private key if present
+        # Process wallet data and decrypt sensitive fields
         wallet_data: WalletData = cast(WalletData, dict(result))
+        
+        # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
+        if wallet_data.get('address'):
+            try:
+                decrypted_address: Optional[str] = get_address_for_display(wallet_data['address'], user_id, pin)
+                if decrypted_address:
+                    wallet_data['address'] = decrypted_address
+                    logger.debug(f"Successfully processed address for wallet {wallet_name} for user {user_id_str}")
+                else:
+                    logger.error(f"Failed to process address for wallet {wallet_name} for user {user_id_str}")
+                    # Keep original address for backwards compatibility
+            except Exception as e:
+                logger.error(f"Error processing address for wallet {wallet_name} for user {user_id_str}: {e}")
+                logger.error(traceback.format_exc())
+                # Keep original address for backwards compatibility
+        
+        # Decrypt private key if present
         if wallet_data.get('private_key'):
             logger.debug(f"Attempting to decrypt private key for wallet {wallet_name} for user {user_id_str}")
             try:
@@ -144,6 +161,15 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
             logger.error(f"Cannot save wallet without an address for user {user_id_str}")
             return False
         
+        # Encrypt the address (always encrypt for new/updated wallets)
+        if wallet_copy.get('address'):
+            logger.debug(f"Encrypting address for wallet {wallet_name} for user {user_id_str}")
+            encrypted_address: Optional[str] = encrypt_address(wallet_copy['address'], user_id, pin)
+            if not encrypted_address:
+                logger.error(f"Failed to encrypt address for wallet {wallet_name} for user {user_id_str}")
+                return False
+            wallet_copy['address'] = encrypted_address
+            
         # Encrypt the private key if present
         if wallet_copy.get('private_key'):
             logger.debug(f"Encrypting private key for wallet {wallet_name} for user {user_id_str}")
@@ -440,6 +466,17 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
                 if 'path' in wallet:
                     wallet['derivation_path'] = wallet.pop('path')
                 
+                # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
+                if wallet.get('address'):
+                    try:
+                        decrypted_address: Optional[str] = get_address_for_display(wallet['address'], user_id, pin)
+                        if decrypted_address:
+                            wallet['address'] = decrypted_address
+                        # If decryption fails, keep original for backwards compatibility
+                    except Exception as e:
+                        logger.error(f"Error processing address for wallet in list: {e}")
+                        # Keep original address for backwards compatibility
+                
                 # Mark as active if this wallet's id matches the active_wallet_id
                 wallet_id = wallet.pop('id', None)  # Remove id from the result
                 wallet['is_active'] = (wallet_id == active_wallet_id)
@@ -625,6 +662,17 @@ def get_user_wallets_with_keys(user_id: Union[int, str], pin: Optional[str] = No
                 if 'path' in wallet_dict:
                     wallet_dict['derivation_path'] = wallet_dict.pop('path')
                 
+                # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
+                if wallet_dict.get('address'):
+                    try:
+                        decrypted_address: Optional[str] = get_address_for_display(wallet_dict['address'], user_id, pin)
+                        if decrypted_address:
+                            wallet_dict['address'] = decrypted_address
+                        # If decryption fails, keep original for backwards compatibility
+                    except Exception as e:
+                        logger.error(f"Error processing address for wallet {name}: {e}")
+                        # Keep original address for backwards compatibility
+                
                 # Decrypt private key if present
                 if wallet_dict.get('private_key'):
                     try:
@@ -748,6 +796,17 @@ def get_wallet_by_name(user_id: Union[int, str], wallet_name: str, pin: Optional
         if 'path' in wallet_dict:
             wallet_dict['derivation_path'] = wallet_dict.pop('path')
         
+        # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
+        if wallet_dict.get('address'):
+            try:
+                decrypted_address: Optional[str] = get_address_for_display(wallet_dict['address'], user_id, pin)
+                if decrypted_address:
+                    wallet_dict['address'] = decrypted_address
+                # If decryption fails, keep original for backwards compatibility
+            except Exception as e:
+                logger.error(f"Error processing address for wallet {wallet_name}: {e}")
+                # Keep original address for backwards compatibility
+        
         # Decrypt private key if present
         if wallet_dict.get('private_key'):
             try:
@@ -795,14 +854,18 @@ def get_wallet_by_name(user_id: Union[int, str], wallet_name: str, pin: Optional
         logger.error(traceback.format_exc())
         return None
 
-def get_wallet_by_address(user_id: Union[int, str], address: str, pin: Optional[str] = None) -> Optional[WalletData]:
+def get_wallet_by_encrypted_address(user_id: Union[int, str], address: str, pin: Optional[str] = None) -> Optional[WalletData]:
     """
-    Get a wallet by its address.
+    Get a wallet by its address using encrypted address lookup.
+    
+    This function provides efficient encrypted address lookup
+    because it encrypts the search address and does a direct database query instead of
+    scanning all wallets.
     
     Args:
         user_id: The user ID
-        address: The wallet address
-        pin: The PIN to use for decryption
+        address: The wallet address (plain text)
+        pin: The PIN to use for encryption/decryption
         
     Returns:
         The wallet data, or None if not found
@@ -811,10 +874,19 @@ def get_wallet_by_address(user_id: Union[int, str], address: str, pin: Optional[
     user_id_str: str = hash_user_id(user_id)
     
     try:
-        logger.debug(f"Querying wallet by address {address} for user: {user_id_str}")
+        logger.debug(f"Querying wallet by encrypted address {address} for user: {user_id_str}")
+        
+        # Encrypt the search address to match what's stored in database
+        encrypted_search_address: Optional[str] = encrypt_address(address, user_id, pin)
+        
+        if not encrypted_search_address:
+            logger.error(f"Failed to encrypt search address for user {user_id_str}")
+            return None
+        
+        # Direct database query using encrypted address
         query_result = execute_query(
             "SELECT * FROM wallets WHERE user_id = ? AND address = ?",
-            (user_id_str, address),
+            (user_id_str, encrypted_search_address),
             fetch='one'
         )
         
@@ -823,7 +895,7 @@ def get_wallet_by_address(user_id: Union[int, str], address: str, pin: Optional[
             result = query_result
         
         if not result:
-            logger.debug(f"No wallet with address {address} found for user: {user_id_str}")
+            logger.debug(f"No wallet with encrypted address found for user: {user_id_str}")
             return None
         
         # Process wallet data
@@ -832,6 +904,9 @@ def get_wallet_by_address(user_id: Union[int, str], address: str, pin: Optional[
         # Rename path to derivation_path for clarity
         if 'path' in wallet_dict:
             wallet_dict['derivation_path'] = wallet_dict.pop('path')
+        
+        # Set the plain text address (we know it matches the input)
+        wallet_dict['address'] = address
         
         # Decrypt private key if present
         if wallet_dict.get('private_key'):
@@ -875,7 +950,10 @@ def get_wallet_by_address(user_id: Union[int, str], address: str, pin: Optional[
                 wallet_dict['private_key'] = None
         
         return cast(WalletData, wallet_dict)
+        
     except Exception as e:
-        logger.error(f"Error retrieving wallet with address {address} for user {user_id_str}: {e}")
+        logger.error(f"Error retrieving wallet with encrypted address {address} for user {user_id_str}: {e}")
         logger.error(traceback.format_exc())
-        return None 
+        return None
+
+ 

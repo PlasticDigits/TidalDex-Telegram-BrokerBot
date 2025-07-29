@@ -407,16 +407,38 @@ def migrate_x_accounts_table() -> bool:
         True if successful, False otherwise
     """
     try:
-        # Check if follower_count column exists
-        result = execute_query("PRAGMA table_info(x_accounts)", fetch='all')
+        # Import DB_TYPE from connections module
+        from db.connections.connection import DB_TYPE
         
-        # If result is None or empty, table doesn't exist
-        if not result:
-            logger.info("x_accounts table doesn't exist, will be created with new schema")
-            return True
+        # Database-agnostic column existence check
+        if DB_TYPE == 'sqlite3':
+            # SQLite: Use PRAGMA table_info
+            result = execute_query("PRAGMA table_info(x_accounts)", fetch='all')
+            
+            # If result is None or empty, table doesn't exist
+            if not result:
+                logger.info("x_accounts table doesn't exist, will be created with new schema")
+                return True
+            
+            # Check if follower columns already exist
+            columns = [row['name'] if isinstance(row, dict) else row[1] for row in result]
+        else:
+            # PostgreSQL: Use information_schema
+            result = execute_query("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'x_accounts' 
+                AND table_schema = 'public'
+            """, fetch='all')
+            
+            # If result is None or empty, table doesn't exist
+            if not result:
+                logger.info("x_accounts table doesn't exist, will be created with new schema")
+                return True
+            
+            # Extract column names from result
+            columns = [row['column_name'] if isinstance(row, dict) else row[0] for row in result]
         
-        # Check if follower columns already exist
-        columns = [row['name'] if isinstance(row, dict) else row[1] for row in result]
         has_follower_count = 'follower_count' in columns
         has_follower_fetched_at = 'follower_fetched_at' in columns
         

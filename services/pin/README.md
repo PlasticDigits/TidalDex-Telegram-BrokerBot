@@ -40,6 +40,7 @@ When a user sets a PIN using `pin_manager.set_pin(user_id, pin)`, the service au
 3. **Re-encrypts all sensitive data** with the new PIN:
    - User mnemonic phrases
    - Wallet private keys
+   - **Wallet addresses**
    - **X account connection data** (access tokens, refresh tokens)
 4. **Stores the PIN** in memory for immediate use
 

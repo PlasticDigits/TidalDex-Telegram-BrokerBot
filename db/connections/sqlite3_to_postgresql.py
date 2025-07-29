@@ -211,6 +211,28 @@ class SQLiteToPostgreSQLConverter:
             return "SET session_replication_role = 'origin';"
         elif re.match(r'^\s*PRAGMA\s+foreign_keys\s*=\s*OFF', sql, re.IGNORECASE):
             return "SET session_replication_role = 'replica';"
+        elif re.match(r'^\s*PRAGMA\s+table_info\s*\(\s*([^)]+)\s*\)', sql, re.IGNORECASE):
+            # Convert PRAGMA table_info(table_name) to PostgreSQL information_schema query
+            table_match = re.search(r'PRAGMA\s+table_info\s*\(\s*([^)]+)\s*\)', sql, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1).strip('\'"')
+                return f"""SELECT 
+                    column_name as name,
+                    ordinal_position as cid,
+                    data_type as type,
+                    CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as "notnull",
+                    column_default as dflt_value,
+                    CASE WHEN column_name IN (
+                        SELECT kcu.column_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                        ON tc.constraint_name = kcu.constraint_name
+                        WHERE tc.table_name = '{table_name}' AND tc.constraint_type = 'PRIMARY KEY'
+                    ) THEN 1 ELSE 0 END as pk
+                FROM information_schema.columns 
+                WHERE table_name = '{table_name}' 
+                AND table_schema = 'public'
+                ORDER BY ordinal_position"""
         elif re.match(r'^\s*PRAGMA', sql, re.IGNORECASE):
             # Other PRAGMA statements need to be handled case by case
             # or removed if no PostgreSQL equivalent exists

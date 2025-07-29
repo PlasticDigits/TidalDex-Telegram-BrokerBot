@@ -15,7 +15,8 @@ from services.wallet.WalletManager import wallet_manager
 # Export the wallet manager functions directly
 get_active_wallet_name: Callable[[str], Optional[str]] = wallet_manager.get_active_wallet_name
 get_wallet_by_name: Callable[[str, str, Optional[str]], Optional[WalletData]] = wallet_manager.get_wallet_by_name
-get_wallet_by_address: Callable[[str, str, Optional[str]], Optional[WalletData]] = wallet_manager.get_wallet_by_address
+
+get_wallet_by_encrypted_address: Callable[[str, str, Optional[str]], Optional[WalletData]] = wallet_manager.get_wallet_by_encrypted_address
 get_user_wallet: Callable[[str, Optional[str], Optional[str]], Optional[WalletData]] = wallet_manager.get_user_wallet
 get_user_wallets: Callable[[str, bool, Optional[str]], Dict[str, WalletData]] = wallet_manager.get_user_wallets
 create_wallet: Callable[[str, str, Optional[str]], Optional[WalletData]] = wallet_manager.create_wallet
@@ -37,7 +38,8 @@ __all__ = [
     'wallet_manager',
     'get_active_wallet_name',
     'get_wallet_by_name',
-    'get_wallet_by_address',
+
+    'get_wallet_by_encrypted_address',
     'get_user_wallet',
     'get_user_wallets',
     'create_wallet',

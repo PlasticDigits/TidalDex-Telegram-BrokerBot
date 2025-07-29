@@ -162,7 +162,7 @@ class PINManager:
         Set a PIN for a user.
         """
         try:
-            # Must reencrypt mnemonic, private keys, and X account data
+            # Must reencrypt mnemonic, private keys, wallet addresses, and X account data
             old_pin: Optional[str] = None
             if self.has_pin(user_id):
                 old_pin = self.get_pin(user_id)

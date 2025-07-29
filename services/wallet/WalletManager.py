@@ -28,7 +28,8 @@ from db.wallet import (
     set_active_wallet as db_set_active_wallet,
     get_active_wallet_name as db_get_active_wallet_name,
     get_wallet_by_name as db_get_wallet_by_name,
-    get_wallet_by_address as db_get_wallet_by_address,
+
+    get_wallet_by_encrypted_address as db_get_wallet_by_encrypted_address,
     get_user_wallets_with_keys as db_get_user_wallets_with_keys,
     has_user_wallet as db_has_user_wallet,
 )
@@ -172,19 +173,23 @@ class WalletManager:
         """
         return db_get_wallet_by_name(user_id, wallet_name, pin)
     
-    def get_wallet_by_address(self, user_id: str, address: str, pin: Optional[str] = None) -> Optional[WalletData]:
+
+    def get_wallet_by_encrypted_address(self, user_id: str, address: str, pin: Optional[str] = None) -> Optional[WalletData]:
         """
-        Get a wallet by its address.
+        Get a wallet by its address using efficient encrypted address lookup.
+        
+        This method provides efficient encrypted address lookup
+        because it encrypts the search address and does a direct database query.
         
         Args:
             user_id (str): The user ID
-            address (str): The wallet address
-            pin (str, optional): PIN for decrypting private key
+            address (str): The wallet address (plain text)
+            pin (str, optional): PIN for encryption/decryption
             
         Returns:
             WalletData: The wallet information, or None if not found
         """
-        return db_get_wallet_by_address(user_id, address, pin)
+        return db_get_wallet_by_encrypted_address(user_id, address, pin)
     
 
     def has_user_wallet(self, user_id: str, pin: Optional[str] = None) -> bool:
@@ -423,7 +428,7 @@ class WalletManager:
                 return None
             
             # Check if a wallet with this address already exists for the user
-            existing_wallet_by_address: Optional[WalletData] = self.get_wallet_by_address(user_id, address, pin)
+            existing_wallet_by_address: Optional[WalletData] = self.get_wallet_by_encrypted_address(user_id, address, pin)
             if existing_wallet_by_address:
                 logger.error(f"Wallet with address '{address}' already exists for user {hash_user_id(user_id)}")
                 return None
