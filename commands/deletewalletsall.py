@@ -38,8 +38,12 @@ async def deletewalletsall_command(update: Update, context: ContextTypes.DEFAULT
     
     logger.info(f"Delete all wallets command initiated by user {user_id_str}")
     
+    # Get PIN for wallet operations
+    from services.pin import pin_manager
+    pin: Optional[str] = pin_manager.get_pin(user_id)
+    
     # Check if the user has any wallets
-    wallets: Union[List[WalletData], Dict[str, WalletData]] = wallet_manager.get_user_wallets(user_id_str)
+    wallets: Union[List[WalletData], Dict[str, WalletData]] = wallet_manager.get_user_wallets(user_id_str, False, pin)
     
     message: Optional[Message] = update.message
     if not message:
