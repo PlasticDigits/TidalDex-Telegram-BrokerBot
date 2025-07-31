@@ -70,15 +70,33 @@ class SQLiteToPostgreSQLConverter:
             # Extract table name
             table_match = re.search(r'INTO\s+([^\s(]+)', sql, re.IGNORECASE)
             if table_match:
-                table_name = table_match.group(1)
-                # Add ON CONFLICT clause for UPSERT
+                table_name = table_match.group(1).strip()
+                # Add ON CONFLICT clause for UPSERT based on table schema
                 if 'ON CONFLICT' not in sql.upper():
                     sql = sql.rstrip(';')
-                    sql += f" ON CONFLICT (token_address, chain_id) DO UPDATE SET "
-                    # Update all columns except the primary key
-                    sql += "token_symbol = EXCLUDED.token_symbol, "
-                    sql += "token_name = EXCLUDED.token_name, "
-                    sql += "token_decimals = EXCLUDED.token_decimals;"
+                    
+                    # Table-specific ON CONFLICT clauses
+                    if table_name == 'tokens':
+                        sql += " ON CONFLICT (token_address, chain_id) DO UPDATE SET "
+                        sql += "token_symbol = EXCLUDED.token_symbol, "
+                        sql += "token_name = EXCLUDED.token_name, "
+                        sql += "token_decimals = EXCLUDED.token_decimals, "
+                        sql += "created_at = EXCLUDED.created_at;"
+                    elif table_name == 'mnemonics':
+                        sql += " ON CONFLICT (user_id) DO UPDATE SET "
+                        sql += "mnemonic = EXCLUDED.mnemonic, "
+                        sql += "created_at = EXCLUDED.created_at;"
+                    elif table_name == 'users':
+                        sql += " ON CONFLICT (user_id) DO UPDATE SET "
+                        sql += "pin_hash = EXCLUDED.pin_hash, "
+                        sql += "active_wallet_id = EXCLUDED.active_wallet_id, "
+                        sql += "mnemonic_index = EXCLUDED.mnemonic_index, "
+                        sql += "settings = EXCLUDED.settings;"
+                    else:
+                        # Generic fallback - try to determine primary key columns
+                        logger.warning(f"Unknown table '{table_name}' for INSERT OR REPLACE conversion")
+                        # For unknown tables, convert to INSERT ... ON CONFLICT DO NOTHING for safety
+                        sql += " ON CONFLICT DO NOTHING;"
         
         # Handle SQLite's "INSERT OR IGNORE" syntax (convert to PostgreSQL "ON CONFLICT DO NOTHING")
         elif "INSERT OR IGNORE" in sql.upper():
@@ -414,15 +432,32 @@ class SQLiteToPostgreSQLConverter:
             # Extract table name
             table_match = re.search(r'INTO\s+([^\s(]+)', sql, re.IGNORECASE)
             if table_match:
-                table_name = table_match.group(1)
-                # Add ON CONFLICT clause for UPSERT
+                table_name = table_match.group(1).strip()
+                # Add ON CONFLICT clause for UPSERT based on table schema
                 if 'ON CONFLICT' not in sql.upper():
-                    # This requires knowledge of the primary key, which we may not have
-                    # A more complete solution would need to consult schema information
                     sql = sql.rstrip(';')
-                    sql += ' ON CONFLICT (id) DO UPDATE SET '
-                    # This is a simplistic approach - in practice you need to know all columns
-                    sql += 'updated_at = EXCLUDED.updated_at;'
+                    
+                    # Table-specific ON CONFLICT clauses (same as main convert_sql function)
+                    if table_name == 'tokens':
+                        sql += " ON CONFLICT (token_address, chain_id) DO UPDATE SET "
+                        sql += "token_symbol = EXCLUDED.token_symbol, "
+                        sql += "token_name = EXCLUDED.token_name, "
+                        sql += "token_decimals = EXCLUDED.token_decimals, "
+                        sql += "created_at = EXCLUDED.created_at;"
+                    elif table_name == 'mnemonics':
+                        sql += " ON CONFLICT (user_id) DO UPDATE SET "
+                        sql += "mnemonic = EXCLUDED.mnemonic, "
+                        sql += "created_at = EXCLUDED.created_at;"
+                    elif table_name == 'users':
+                        sql += " ON CONFLICT (user_id) DO UPDATE SET "
+                        sql += "pin_hash = EXCLUDED.pin_hash, "
+                        sql += "active_wallet_id = EXCLUDED.active_wallet_id, "
+                        sql += "mnemonic_index = EXCLUDED.mnemonic_index, "
+                        sql += "settings = EXCLUDED.settings;"
+                    else:
+                        # Generic fallback for unknown tables
+                        logger.warning(f"Unknown table '{table_name}' for INSERT OR REPLACE conversion in convert_insert")
+                        sql += " ON CONFLICT DO NOTHING;"
             
         elif re.match(r'^\s*INSERT\s+OR\s+IGNORE', sql, re.IGNORECASE):
             sql = re.sub(
