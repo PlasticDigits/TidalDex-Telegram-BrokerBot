@@ -267,14 +267,14 @@ class WalletManager:
         Args:
             user_id (str): The user ID
             include_private_keys (bool): Whether to include private keys
-            pin (str, optional): PIN for decrypting private keys
+            pin (str, optional): PIN for decrypting private keys and addresses
             
         Returns:
             Dict[str, WalletData]: Dictionary of wallet name to wallet data
         """
         if include_private_keys:
             return db_get_user_wallets_with_keys(user_id, pin)
-        return db_get_user_wallets(user_id)
+        return db_get_user_wallets(user_id, pin)  # Pass PIN to decrypt addresses
     
 
     def save_user_mnemonic(self, user_id: str, mnemonic: str, pin: Optional[str] = None) -> bool:

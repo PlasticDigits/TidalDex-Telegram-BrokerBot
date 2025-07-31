@@ -153,9 +153,18 @@ class SQLiteToPostgreSQLConverter:
             sql = pattern.sub(pg_func, sql)
             
         # Handle RETURNING clause for INSERT statements if needed
+        # Only add RETURNING for tables with auto-incrementing id columns, not for tables with custom primary keys
         if re.match(r'^\s*INSERT\s+INTO', sql, re.IGNORECASE) and 'RETURNING' not in sql.upper():
-            sql = sql.rstrip(';')
-            sql += ' RETURNING id;'
+            # Extract table name to determine if we need RETURNING
+            table_match = re.search(r'INSERT\s+INTO\s+([^\s(]+)', sql, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1).strip()
+                # Tables with auto-incrementing SERIAL id columns that benefit from RETURNING
+                auto_id_tables = ['wallets', 'tokens', 'user_tracked_tokens', 'user_balances']
+                # Don't add RETURNING for ON CONFLICT DO NOTHING queries (INSERT OR IGNORE)
+                if table_name in auto_id_tables and 'ON CONFLICT DO NOTHING' not in sql.upper():
+                    sql = sql.rstrip(';')
+                    sql += ' RETURNING id;'
         
         # Handle boolean literals (SQLite uses 0/1, PostgreSQL uses true/false)
         # Only convert standalone 0/1 values, not those that might be used for integer columns
@@ -381,9 +390,18 @@ class SQLiteToPostgreSQLConverter:
             sql = pattern.sub(pg_func, sql)
         
         # Handle RETURNING clause for INSERT statements if needed
+        # Only add RETURNING for tables with auto-incrementing id columns, not for tables with custom primary keys
         if re.match(r'^\s*INSERT\s+INTO', sql, re.IGNORECASE) and 'RETURNING' not in sql.upper():
-            sql = sql.rstrip(';')
-            sql += ' RETURNING id;'
+            # Extract table name to determine if we need RETURNING
+            table_match = re.search(r'INSERT\s+INTO\s+([^\s(]+)', sql, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1).strip()
+                # Tables with auto-incrementing SERIAL id columns that benefit from RETURNING
+                auto_id_tables = ['wallets', 'tokens', 'user_tracked_tokens', 'user_balances']
+                # Don't add RETURNING for ON CONFLICT DO NOTHING queries (INSERT OR IGNORE)
+                if table_name in auto_id_tables and 'ON CONFLICT DO NOTHING' not in sql.upper():
+                    sql = sql.rstrip(';')
+                    sql += ' RETURNING id;'
         
         # Handle SQLite's INSERT OR REPLACE/INSERT OR IGNORE syntax
         if re.match(r'^\s*INSERT\s+OR\s+REPLACE', sql, re.IGNORECASE):
