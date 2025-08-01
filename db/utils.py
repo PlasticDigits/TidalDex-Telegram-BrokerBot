@@ -277,7 +277,7 @@ def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: 
                 # We need to find the wallet ID to update it
                 user_id_hashed = hash_user_id(user_id)
                 execute_query(
-                    "UPDATE wallets SET address = ? WHERE user_id = ? AND address = ?",
+                    "UPDATE wallets SET address = %s WHERE user_id = %s AND address = %s",
                     (encrypted_address, user_id_hashed, stored_address)
                 )
                 logger.debug(f"Successfully encrypted and updated address for user {hash_user_id(user_id)}")
@@ -408,7 +408,7 @@ def migrate_user_wallet_addresses(user_id: Union[int, str], pin: Optional[str] =
         
         # Get all wallets for this user
         user_wallets = execute_query(
-            "SELECT id, address, name FROM wallets WHERE user_id = ?",
+            "SELECT id, address, name FROM wallets WHERE user_id = %s",
             (user_id_str,),
             fetch='all'
         )
@@ -444,7 +444,7 @@ def migrate_user_wallet_addresses(user_id: Union[int, str], pin: Optional[str] =
                 if encrypted_address:
                     # Update the database
                     execute_query(
-                        "UPDATE wallets SET address = ? WHERE id = ?",
+                        "UPDATE wallets SET address = %s WHERE id = %s",
                         (encrypted_address, wallet_id)
                     )
                     migrated_count += 1

@@ -1,9 +1,8 @@
 """
-Database connection management.
-Provides functions to create, test, and manage database connections.
+Database connection management for PostgreSQL.
+Provides functions to create, test, and manage PostgreSQL database connections.
 
-This module is a wrapper around the actual database connection implementation.
-It imports all functions from the selected database driver (sqlite3 or postgresql).
+This module is a wrapper around the PostgreSQL database connection implementation.
 """
 from typing import Any, Dict, List, Optional, Union, Callable, TypeVar, cast
 from functools import wraps
@@ -11,7 +10,7 @@ from functools import wraps
 # Define F type variable for better type checking with decorators
 F = TypeVar('F', bound=Callable[..., Any])
 
-# Import all functions from the new connection module
+# Import all functions from the PostgreSQL connection module
 from db.connections.connection import (
     create_connection,
     get_connection,
@@ -20,8 +19,6 @@ from db.connections.connection import (
     execute_query,
     test_connection,
     init_db,
-    DB_TYPE,
-    retry_on_db_lock,
     retry_on_db_error
 )
 
@@ -34,17 +31,14 @@ __all__ = [
     'execute_query',
     'test_connection',
     'init_db',
-    'DB_TYPE',
     'retry_decorator'
 ]
 
-# For backward compatibility
-if DB_TYPE == 'sqlite3' and retry_on_db_lock is not None:
-    retry_decorator = retry_on_db_lock
-elif DB_TYPE == 'postgresql' and retry_on_db_error is not None:
+# Use PostgreSQL retry decorator
+if retry_on_db_error is not None:
     retry_decorator = retry_on_db_error
 else:
-    # Fallback decorator if neither is available
+    # Fallback decorator if retry_on_db_error is not available
     def retry_decorator(max_attempts: int = 5, initial_wait: float = 0.1) -> Callable[[F], F]:
         def decorator(func: F) -> F:
             @wraps(func)

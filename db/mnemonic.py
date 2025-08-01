@@ -40,21 +40,21 @@ def save_user_mnemonic(user_id: Union[int, str], mnemonic: str, pin: Optional[st
     # Explicitly set active_wallet_id to NULL to avoid foreign key constraint
     logger.debug(f"Ensuring user {user_id_str} exists in users table")
     execute_query(
-        "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
+        "INSERT INTO users (user_id, active_wallet_id) VALUES (%s, NULL) ON CONFLICT (user_id) DO NOTHING",
         (user_id_str,)
     )
         
     # Insert or replace mnemonic
     logger.debug(f"Saving encrypted mnemonic for user {user_id_str}")
     execute_query(
-        "INSERT OR REPLACE INTO mnemonics (user_id, mnemonic) VALUES (?, ?)",
+        "INSERT INTO mnemonics (user_id, mnemonic) VALUES (%s, %s) ON CONFLICT (user_id) DO UPDATE SET mnemonic = EXCLUDED.mnemonic",
         (user_id_str, encrypted_mnemonic)
     )
 
     # Reset the mnemonic index to 0
     logger.debug(f"Resetting mnemonic index for user {user_id_str}")
     execute_query(
-        "UPDATE users SET mnemonic_index = 0 WHERE user_id = ?",
+        "UPDATE users SET mnemonic_index = 0 WHERE user_id = %s",
         (user_id_str,)
     )
         
@@ -69,8 +69,8 @@ def increment_user_mnemonic_index(user_id: Union[int, str]) -> bool:
 
     try:
         result: QueryResult = execute_query(
-            "UPDATE users SET mnemonic_index = mnemonic_index + 1 WHERE user_id = ?",
-            (user_id_str,)
+                    "UPDATE users SET mnemonic_index = mnemonic_index + 1 WHERE user_id = %s",
+        (user_id_str,)
         )
         
         if not result or not isinstance(result, dict):
@@ -92,7 +92,7 @@ def get_user_mnemonic_index(user_id: Union[int, str]) -> Optional[int]:
     
     try:
         result: QueryResult = execute_query(
-            "SELECT mnemonic_index FROM users WHERE user_id = ?",
+            "SELECT mnemonic_index FROM users WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -123,7 +123,7 @@ def get_user_mnemonic(user_id: Union[int, str], pin: Optional[str] = None) -> Op
 
     logger.debug(f"Querying mnemonic for user: {user_id_str}")
     result: QueryResult = execute_query(
-        "SELECT mnemonic FROM mnemonics WHERE user_id = ?",
+        "SELECT mnemonic FROM mnemonics WHERE user_id = %s",
         (user_id_str,),
         fetch='one'
     )
@@ -158,7 +158,7 @@ def delete_user_mnemonic(user_id: Union[int, str]) -> bool:
     
     try:
         execute_query(
-            "DELETE FROM mnemonics WHERE user_id = ?", 
+            "DELETE FROM mnemonics WHERE user_id = %s", 
             (user_id_str,)
         )
         

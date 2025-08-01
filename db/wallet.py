@@ -48,7 +48,7 @@ def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None,
         if wallet_name:
             logger.debug(f"Querying specific wallet {wallet_name} for user: {user_id_str}")
             result = execute_query(
-                "SELECT * FROM wallets WHERE user_id = ? AND name = ?",
+                "SELECT * FROM wallets WHERE user_id = %s AND name = %s",
                 (user_id_str, wallet_name),
                 fetch='one'
             )
@@ -59,7 +59,7 @@ def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None,
                 """
                 SELECT w.* FROM wallets w
                 JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
-                WHERE u.user_id = ?
+                WHERE u.user_id = %s
                 """,
                 (user_id_str,),
                 fetch='one'
@@ -182,13 +182,13 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
         # First, create user record if it doesn't exist
         logger.debug(f"Ensuring user {user_id_str} exists in users table")
         execute_query(
-            "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
+            "INSERT INTO users (user_id, active_wallet_id) VALUES (%s, NULL) ON CONFLICT (user_id) DO NOTHING",
             (user_id_str,)
         )
         
         # Check if wallet with this name exists for user
         existing_wallet: QueryResult = execute_query(
-            "SELECT id FROM wallets WHERE user_id = ? AND name = ?",
+            "SELECT id FROM wallets WHERE user_id = %s AND name = %s",
             (user_id_str, wallet_name),
             fetch='one'
         )
@@ -202,23 +202,23 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
             values: List[Any] = []
             
             if 'address' in wallet_copy:
-                fields.append("address = ?")
+                fields.append("address = %s")
                 values.append(wallet_copy['address'])
             
             if 'private_key' in wallet_copy:
-                fields.append("private_key = ?")
+                fields.append("private_key = %s")
                 values.append(wallet_copy['private_key'])
             
             if 'derivation_path' in wallet_copy:
-                fields.append("path = ?")
+                fields.append("path = %s")
                 values.append(wallet_copy['derivation_path'])
                 
             if 'is_imported' in wallet_copy:
-                fields.append("is_imported = ?")
+                fields.append("is_imported = %s")
                 values.append(1 if wallet_copy['is_imported'] else 0)
             
             if 'is_active' in wallet_copy:
-                fields.append("is_active = ?")
+                fields.append("is_active = %s")
                 values.append(1 if wallet_copy['is_active'] else 0)
             
             # If there are fields to update
@@ -228,7 +228,7 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
                 values.append(wallet_name)
                 
                 # Execute update query
-                query: str = f"UPDATE wallets SET {', '.join(fields)} WHERE user_id = ? AND name = ?"
+                query: str = f"UPDATE wallets SET {', '.join(fields)} WHERE user_id = %s AND name = %s"
                 execute_query(query, tuple(values))
             
             logger.debug(f"Wallet {wallet_name} updated for user {user_id_str}")
@@ -248,7 +248,7 @@ def save_user_wallet(user_id: Union[int, str], wallet_data: Dict[str, Any], wall
                 """
                 INSERT INTO wallets 
                 (user_id, name, address, private_key, path, is_imported, created_at) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (user_id_str, wallet_name, address, private_key, derivation_path, 1 if is_imported else 0, now)
             )
@@ -288,7 +288,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
             
             # Get the wallet ID for the wallet being deleted
             wallet_info: QueryResult = execute_query(
-                "SELECT id FROM wallets WHERE user_id = ? AND name = ?",
+                "SELECT id FROM wallets WHERE user_id = %s AND name = %s",
                 (user_id_str, wallet_name),
                 fetch='one'
             )
@@ -301,7 +301,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
             
             # Delete the wallet
             execute_query(
-                "DELETE FROM wallets WHERE user_id = ? AND name = ?",
+                "DELETE FROM wallets WHERE user_id = %s AND name = %s",
                 (user_id_str, wallet_name)
             )
             
@@ -309,7 +309,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
             if was_active:
                 # There are other wallets, set the first one as active
                 new_active: QueryResult = execute_query(
-                    "SELECT id, name FROM wallets WHERE user_id = ? LIMIT 1",
+                    "SELECT id, name FROM wallets WHERE user_id = %s LIMIT 1",
                     (user_id_str,),
                     fetch='one'
                 )
@@ -317,7 +317,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 if new_active and isinstance(new_active, dict):
                     logger.debug(f"Setting wallet {new_active['name']} as active for user: {user_id_str}")
                     execute_query(
-                        "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+                        "UPDATE users SET active_wallet_id = %s WHERE user_id = %s",
                         (new_active['id'], user_id_str)
                     )
         else:
@@ -328,7 +328,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 SELECT w.name 
                 FROM wallets w
                 JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
-                WHERE u.user_id = ?
+                WHERE u.user_id = %s
                 """,
                 (user_id_str,),
                 fetch='one'
@@ -336,13 +336,13 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
             
             if active_wallet and isinstance(active_wallet, dict):
                 execute_query(
-                    "DELETE FROM wallets WHERE user_id = ? AND name = ?",
+                    "DELETE FROM wallets WHERE user_id = %s AND name = %s",
                     (user_id_str, active_wallet['name'])
                 )
                 
                 # Set another wallet as active if possible
                 another_active: QueryResult = execute_query(
-                    "SELECT id, name FROM wallets WHERE user_id = ? LIMIT 1",
+                    "SELECT id, name FROM wallets WHERE user_id = %s LIMIT 1",
                     (user_id_str,),
                     fetch='one'
                 )
@@ -350,7 +350,7 @@ def delete_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = No
                 if another_active and isinstance(another_active, dict):
                     logger.debug(f"Setting wallet {another_active['name']} as active for user: {user_id_str}")
                     execute_query(
-                        "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+                        "UPDATE users SET active_wallet_id = %s WHERE user_id = %s",
                         (another_active['id'], user_id_str)
                     )
             else:
@@ -379,7 +379,7 @@ def get_active_wallet_id(user_id: Union[int, str]) -> Optional[int]:
     
     try:
         result: QueryResult = execute_query(
-            "SELECT active_wallet_id FROM users WHERE user_id = ?",
+            "SELECT active_wallet_id FROM users WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -410,7 +410,7 @@ def has_user_wallet(user_id: Union[int, str], pin: Optional[str] = None) -> bool
     
     try:
         result: QueryResult = execute_query(
-            "SELECT COUNT(*) as count FROM wallets WHERE user_id = ?",
+            "SELECT COUNT(*) as count FROM wallets WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -446,7 +446,7 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
         
         # Now get all wallets
         results: QueryResult = execute_query(
-            "SELECT id, name, address, path, is_imported, created_at FROM wallets WHERE user_id = ?",
+            "SELECT id, name, address, path, is_imported, created_at FROM wallets WHERE user_id = %s",
             (user_id_str,),
             fetch='all'
         )
@@ -513,7 +513,7 @@ def set_active_wallet(user_id: Union[int, str], wallet_name: str) -> bool:
     try:
         # Check if the wallet exists and get its ID
         wallet_info: QueryResult = execute_query(
-            "SELECT id FROM wallets WHERE user_id = ? AND name = ?",
+            "SELECT id FROM wallets WHERE user_id = %s AND name = %s",
             (user_id_str, wallet_name),
             fetch='one'
         )
@@ -524,7 +524,7 @@ def set_active_wallet(user_id: Union[int, str], wallet_name: str) -> bool:
         
         # Update the active_wallet_id in the users table
         execute_query(
-            "UPDATE users SET active_wallet_id = ? WHERE user_id = ?",
+            "UPDATE users SET active_wallet_id = %s WHERE user_id = %s",
             (wallet_info['id'], user_id_str)
         )
         
@@ -579,7 +579,7 @@ def rename_wallet(user_id: Union[int, str], new_name: str) -> Tuple[bool, str]:
     try:
         # Check if wallet with new name already exists
         existing_wallet: QueryResult = execute_query(
-            "SELECT id FROM wallets WHERE user_id = ? AND name = ?", 
+            "SELECT id FROM wallets WHERE user_id = %s AND name = %s", 
             (user_id_str, new_name),
             fetch='one'
         )
@@ -593,7 +593,7 @@ def rename_wallet(user_id: Union[int, str], new_name: str) -> Tuple[bool, str]:
             SELECT w.id, w.name 
             FROM wallets w
             JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
-            WHERE u.user_id = ?
+            WHERE u.user_id = %s
             """, 
             (user_id_str,),
             fetch='one'
@@ -610,7 +610,7 @@ def rename_wallet(user_id: Union[int, str], new_name: str) -> Tuple[bool, str]:
         
         # Update the wallet name
         execute_query(
-            "UPDATE wallets SET name = ? WHERE id = ?",
+            "UPDATE wallets SET name = %s WHERE id = %s",
             (new_name, wallet_id)
         )
         
@@ -639,7 +639,7 @@ def get_user_wallets_with_keys(user_id: Union[int, str], pin: Optional[str] = No
     try:
         logger.debug(f"Querying all wallets with keys for user: {user_id_str}")
         results: QueryResult = execute_query(
-            "SELECT * FROM wallets WHERE user_id = ?",
+            "SELECT * FROM wallets WHERE user_id = %s",
             (user_id_str,),
             fetch='all'
         )
@@ -743,7 +743,7 @@ def get_active_wallet_name(user_id: Union[int, str]) -> Optional[str]:
             SELECT w.name 
             FROM wallets w
             JOIN users u ON w.id = u.active_wallet_id AND w.user_id = u.user_id
-            WHERE u.user_id = ?
+            WHERE u.user_id = %s
             """,
             (user_id_str,),
             fetch='one'
@@ -776,7 +776,7 @@ def get_wallet_by_name(user_id: Union[int, str], wallet_name: str, pin: Optional
     try:
         logger.debug(f"Querying wallet by name {wallet_name} for user: {user_id_str}")
         query_result = execute_query(
-            "SELECT * FROM wallets WHERE user_id = ? AND name = ?",
+            "SELECT * FROM wallets WHERE user_id = %s AND name = %s",
             (user_id_str, wallet_name),
             fetch='one'
         )
@@ -885,7 +885,7 @@ def get_wallet_by_encrypted_address(user_id: Union[int, str], address: str, pin:
         
         # Direct database query using encrypted address
         query_result = execute_query(
-            "SELECT * FROM wallets WHERE user_id = ? AND address = ?",
+            "SELECT * FROM wallets WHERE user_id = %s AND address = %s",
             (user_id_str, encrypted_search_address),
             fetch='one'
         )

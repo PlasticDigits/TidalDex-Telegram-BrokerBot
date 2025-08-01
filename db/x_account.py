@@ -117,7 +117,7 @@ def save_x_account_connection(
         
         # Check if connection already exists
         existing = execute_query(
-            "SELECT user_id FROM x_accounts WHERE user_id = ?",
+            "SELECT user_id FROM x_accounts WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -128,10 +128,10 @@ def save_x_account_connection(
             result = execute_query(
                 """
                 UPDATE x_accounts SET 
-                    x_user_id = ?, x_username = ?, x_display_name = ?, x_profile_image_url = ?,
-                    access_token = ?, refresh_token = ?, token_expires_at = ?, scope = ?, last_updated = ?,
-                    follower_count = ?, follower_fetched_at = ?
-                WHERE user_id = ?
+                            x_user_id = %s, x_username = %s, x_display_name = %s, x_profile_image_url = %s,
+        access_token = %s, refresh_token = %s, token_expires_at = %s, scope = %s, last_updated = %s,
+        follower_count = %s, follower_fetched_at = %s
+        WHERE user_id = %s
                 """,
                 (x_user_id, x_username, x_display_name, x_profile_image_url,
                  encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time,
@@ -146,7 +146,7 @@ def save_x_account_connection(
                 (user_id, x_user_id, x_username, x_display_name, x_profile_image_url, 
                  access_token, refresh_token, token_expires_at, scope, connected_at, last_updated,
                  follower_count, follower_fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (user_id_str, x_user_id, x_username, x_display_name, x_profile_image_url,
                  encrypted_access_token, encrypted_refresh_token, token_expires_at, scope, current_time, current_time,
@@ -176,7 +176,7 @@ def get_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
     try:
         logger.info(f"Getting X account connection for user: {user_id_str}")
         result = execute_query(
-            "SELECT * FROM x_accounts WHERE user_id = ?",
+            "SELECT * FROM x_accounts WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -258,7 +258,7 @@ async def get_x_account_connection_with_fresh_followers(user_id: Union[int, str]
                 logger.info(f"Updating follower count for user {user_id_str}: {new_follower_count}")
                 
                 execute_query(
-                    "UPDATE x_accounts SET follower_count = ?, follower_fetched_at = ?, last_updated = ? WHERE user_id = ?",
+                    "UPDATE x_accounts SET follower_count = %s, follower_fetched_at = %s, last_updated = %s WHERE user_id = %s",
                     (new_follower_count, current_time, current_time, user_id_str)
                 )
                 
@@ -288,7 +288,7 @@ def delete_x_account_connection(user_id: Union[int, str]) -> bool:
     
     try:
         result = execute_query(
-            "DELETE FROM x_accounts WHERE user_id = ?",
+            "DELETE FROM x_accounts WHERE user_id = %s",
             (user_id_str,)
         )
         
@@ -318,7 +318,7 @@ def has_x_account_connection(user_id: Union[int, str], pin: Optional[str] = None
         
         # First check if record exists
         result = execute_query(
-            "SELECT access_token FROM x_accounts WHERE user_id = ? LIMIT 1",
+            "SELECT access_token FROM x_accounts WHERE user_id = %s LIMIT 1",
             (user_id_str,),
             fetch='one'
         )
@@ -387,7 +387,7 @@ def cleanup_corrupted_x_account(user_id: Union[int, str]) -> bool:
     
     try:
         result = execute_query(
-            "DELETE FROM x_accounts WHERE user_id = ?",
+            "DELETE FROM x_accounts WHERE user_id = %s",
             (user_id_str,)
         )
         
@@ -407,37 +407,21 @@ def migrate_x_accounts_table() -> bool:
         True if successful, False otherwise
     """
     try:
-        # Import DB_TYPE from connections module
-        from db.connections.connection import DB_TYPE
+        # PostgreSQL: Use information_schema to check column existence
+        result = execute_query("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'x_accounts' 
+            AND table_schema = 'public'
+        """, fetch='all')
         
-        # Database-agnostic column existence check
-        if DB_TYPE == 'sqlite3':
-            # SQLite: Use PRAGMA table_info
-            result = execute_query("PRAGMA table_info(x_accounts)", fetch='all')
-            
-            # If result is None or empty, table doesn't exist
-            if not result:
-                logger.info("x_accounts table doesn't exist, will be created with new schema")
-                return True
-            
-            # Check if follower columns already exist
-            columns = [row['name'] if isinstance(row, dict) else row[1] for row in result]
-        else:
-            # PostgreSQL: Use information_schema
-            result = execute_query("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'x_accounts' 
-                AND table_schema = 'public'
-            """, fetch='all')
-            
-            # If result is None or empty, table doesn't exist
-            if not result:
-                logger.info("x_accounts table doesn't exist, will be created with new schema")
-                return True
-            
-            # Extract column names from result
-            columns = [row['column_name'] if isinstance(row, dict) else row[0] for row in result]
+        # If result is None or empty, table doesn't exist
+        if not result:
+            logger.info("x_accounts table doesn't exist, will be created with new schema")
+            return True
+        
+        # Extract column names from result
+        columns = [row['column_name'] if isinstance(row, dict) else row[0] for row in result]
         
         has_follower_count = 'follower_count' in columns
         has_follower_fetched_at = 'follower_fetched_at' in columns
@@ -476,8 +460,8 @@ def create_x_accounts_table() -> bool:
             logger.error("Failed to migrate x_accounts table")
             return False
         
-        # SQLite table creation
-        sqlite_sql = """
+        # PostgreSQL table creation  
+        postgres_sql = """
         CREATE TABLE IF NOT EXISTS x_accounts (
             user_id TEXT PRIMARY KEY,
             x_user_id TEXT NOT NULL,
@@ -496,7 +480,7 @@ def create_x_accounts_table() -> bool:
         );
         """
         
-        result = execute_query(sqlite_sql)
+        result = execute_query(postgres_sql)
         logger.info("X accounts table created/verified successfully")
         return result is not None
         

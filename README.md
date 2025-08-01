@@ -38,22 +38,16 @@ Use `mypy main.py --strict` for type checking.
 
 ## Database
 
-The TidalDex Telegram Broker Bot supports two database backends:
+The TidalDex Telegram Broker Bot uses PostgreSQL as its database backend.
 
-### Database Options
+### Database Setup
 
-1. **SQLite** (Default)
+**PostgreSQL** is required for all deployments:
 
-   - Lightweight, file-based database
-   - Perfect for personal use or small deployments
-   - No additional setup required
-   - Data stored in `data/tidaldex.db` by default
-
-2. **PostgreSQL**
-   - Robust, scalable database for production environments
-   - Better performance with many concurrent users
-   - Supports advanced features like replication and backups
-   - Requires a PostgreSQL server
+- Robust, scalable database for production environments
+- Better performance with many concurrent users
+- Supports advanced features like replication and backups
+- Requires a PostgreSQL server
 
 ### Configuration
 
@@ -61,14 +55,11 @@ Database settings are configured in the `.env` file:
 
 ```
 # Database configuration
-DB_TYPE=sqlite3        # Options: sqlite3, postgresql
-DB_NAME=tidaldex.db    # Database name or path for SQLite
-
-# PostgreSQL specific configurations (only needed if DB_TYPE=postgresql)
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=postgres
+DB_NAME=tidaldex       # PostgreSQL database name
+DB_HOST=localhost      # Database host
+DB_PORT=5432          # Database port
+DB_USER=postgres      # Database user
+DB_PASSWORD=postgres  # Database password
 ```
 
 ### Database Schema

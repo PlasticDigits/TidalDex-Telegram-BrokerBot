@@ -28,7 +28,7 @@ def get_user_tracked_tokens(user_id: Union[int, str]) -> List[Dict[str, Any]]:
         SELECT utt.id, t.id as token_id, t.token_address, t.token_symbol, t.token_name, t.token_decimals
         FROM user_tracked_tokens utt
         JOIN tokens t ON utt.token_id = t.id
-        WHERE utt.user_id = ?
+        WHERE utt.user_id = %s
         """,
         (user_id_str,),
         fetch='all'
@@ -54,7 +54,7 @@ def get_token_by_address(token_address: str) -> Optional[Dict[str, Any]]:
         Token information or None if not found
     """
     result: QueryResult = execute_query(
-        "SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id FROM tokens WHERE token_address = ?",
+        "SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id FROM tokens WHERE token_address = %s",
         (token_address,),
         fetch='one'
     )
@@ -79,7 +79,7 @@ def get_tracked_token_by_id(tracking_id: int) -> Optional[Dict[str, Any]]:
         SELECT utt.id, t.id as token_id, t.token_address, t.token_symbol, t.token_name, t.token_decimals
         FROM user_tracked_tokens utt
         JOIN tokens t ON utt.token_id = t.id
-        WHERE utt.id = ?
+        WHERE utt.id = %s
         """,
         (tracking_id,),
         fetch='one'
@@ -109,7 +109,7 @@ def add_token(token_address: str, token_symbol: str, token_name: str, token_deci
             """
             INSERT INTO tokens 
             (token_address, token_symbol, token_name, token_decimals, chain_id) 
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (token_address, token_symbol, token_name, token_decimals, chain_id)
         )
@@ -137,7 +137,7 @@ def track_token(user_id: Union[int, str], token_id: int) -> Optional[int]:
     try:
         # Check if token is already tracked by this user
         result: QueryResult = execute_query(
-            "SELECT id FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?",
+            "SELECT id FROM user_tracked_tokens WHERE user_id = %s AND token_id = %s",
             (user_id_str, token_id),
             fetch='one'
         )
@@ -152,13 +152,13 @@ def track_token(user_id: Union[int, str], token_id: int) -> Optional[int]:
         
         # Insert the tracking entry
         execute_query(
-            "INSERT INTO user_tracked_tokens (user_id, token_id) VALUES (?, ?)",
+            "INSERT INTO user_tracked_tokens (user_id, token_id) VALUES (%s, %s)",
             (user_id_str, token_id)
         )
         
         # Get the newly created tracking ID
         new_tracking_entry: QueryResult = execute_query(
-            "SELECT id FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?",
+            "SELECT id FROM user_tracked_tokens WHERE user_id = %s AND token_id = %s",
             (user_id_str, token_id),
             fetch='one'
         )
@@ -184,7 +184,7 @@ def stop_tracking_token(tracking_id: int) -> bool:
     try:
         # Get the tracking entry first to confirm it exists
         tracking = execute_query(
-            "SELECT id FROM user_tracked_tokens WHERE id = ?",
+            "SELECT id FROM user_tracked_tokens WHERE id = %s",
             (tracking_id,),
             fetch='one'
         )
@@ -195,7 +195,7 @@ def stop_tracking_token(tracking_id: int) -> bool:
         
         # Delete the tracking entry
         execute_query(
-            "DELETE FROM user_tracked_tokens WHERE id = ?",
+            "DELETE FROM user_tracked_tokens WHERE id = %s",
             (tracking_id,)
         )
         
@@ -225,7 +225,7 @@ def record_token_balance(user_id: Union[int, str], token_id: int, wallet_address
             """
             INSERT INTO token_balances 
             (user_id, token_id, wallet_address, balance, timestamp) 
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
             """,
             (user_id_str, token_id, wallet_address, balance)
         )
@@ -254,9 +254,9 @@ def get_token_balance_history(user_id: Union[int, str], token_id: int, limit: in
             """
             SELECT id, wallet_address, balance, timestamp 
             FROM token_balances 
-            WHERE user_id = ? AND token_id = ? 
+            WHERE user_id = %s AND token_id = %s 
             ORDER BY timestamp DESC 
-            LIMIT ?
+            LIMIT %s
             """,
             (user_id_str, token_id, limit),
             fetch='all'

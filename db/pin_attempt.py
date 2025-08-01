@@ -55,7 +55,7 @@ def get_pin_attempt_data(user_id: Union[int, str]) -> Optional[Dict[str, int]]:
     try:
         # The return type of execute_query with fetch='one' can be Dict[str, Any] or None
         result: QueryResult = execute_query(
-            "SELECT failure_count, last_attempt_time FROM pin_attempts WHERE user_id = ?",
+            "SELECT failure_count, last_attempt_time FROM pin_attempts WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )
@@ -94,7 +94,7 @@ def save_pin_attempt_data(user_id: Union[int, str], failure_count: int, last_att
     try:
         # First ensure user exists in users table
         execute_query(
-            "INSERT OR IGNORE INTO users (user_id, active_wallet_id) VALUES (?, NULL)",
+            "INSERT INTO users (user_id, active_wallet_id) VALUES (%s, NULL) ON CONFLICT (user_id) DO NOTHING",
             (user_id_str,)
         )
         
@@ -102,10 +102,10 @@ def save_pin_attempt_data(user_id: Union[int, str], failure_count: int, last_att
         execute_query(
             """
             INSERT INTO pin_attempts (user_id, failure_count, last_attempt_time)
-            VALUES (?, ?, ?)
+            VALUES (%s, %s, %s)
             ON CONFLICT(user_id) DO UPDATE SET
-                failure_count = ?,
-                last_attempt_time = ?
+                failure_count = %s,
+                last_attempt_time = %s
             """,
             (user_id_str, failure_count, last_attempt_time, failure_count, last_attempt_time)
         )
@@ -136,10 +136,10 @@ def reset_pin_attempts(user_id: Union[int, str]) -> bool:
         execute_query(
             """
             INSERT INTO pin_attempts (user_id, failure_count, last_attempt_time)
-            VALUES (?, 0, ?)
+            VALUES (%s, 0, %s)
             ON CONFLICT(user_id) DO UPDATE SET
                 failure_count = 0,
-                last_attempt_time = ?
+                last_attempt_time = %s
             """,
             (user_id_str, current_time, current_time)
         )

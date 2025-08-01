@@ -32,7 +32,7 @@ def save_user_pin(user_id: Union[int, str], pin: str) -> bool:
     try:
         # Update the user's PIN hash in the database
         execute_query(
-            "UPDATE users SET pin_hash = ? WHERE user_id = ?",
+            "UPDATE users SET pin_hash = %s WHERE user_id = %s",
             (pin_hash, user_id_str)
         )
         
@@ -59,7 +59,7 @@ def get_user_pin_hash(user_id: Union[int, str]) -> Optional[str]:
     try:
         # The return type of execute_query with fetch='one' can be Dict[str, Any] or None
         result: QueryResult = execute_query(
-            "SELECT pin_hash FROM users WHERE user_id = ?",
+            "SELECT pin_hash FROM users WHERE user_id = %s",
             (user_id_str,),
             fetch='one'
         )

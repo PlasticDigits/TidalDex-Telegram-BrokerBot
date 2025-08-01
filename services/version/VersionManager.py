@@ -147,11 +147,11 @@ class VersionManager:
             
             if existing:
                 # Update existing record
-                query = "UPDATE application SET version = ?, updated_at = ? WHERE id = 1"
+                query = "UPDATE application SET version = %s, updated_at = %s WHERE id = 1"
                 params = (version, current_timestamp)
             else:
                 # Insert new record
-                query = "INSERT INTO application (id, version, updated_at) VALUES (1, ?, ?)"
+                query = "INSERT INTO application (id, version, updated_at) VALUES (1, %s, %s)"
                 params = (version, current_timestamp)
             
             result = execute_query(query, params)

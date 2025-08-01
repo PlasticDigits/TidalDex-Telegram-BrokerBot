@@ -277,12 +277,9 @@ def execute_query(query, params=(), fetch=None, db_name=None, db_user=None, db_p
         if conn is None:
             raise Exception("Failed to get PostgreSQL database connection")
         
-        # Convert SQLite-specific syntax to PostgreSQL
-        from db.connections.sqlite3_to_postgresql import convert_sql
-        pg_query = convert_sql(query)
-        
-        # Parameter conversion is now handled in sqlite3_to_postgresql.py
-        logger.debug(f"Converted query: {pg_query}")
+        # Use the query directly since we only support PostgreSQL now
+        pg_query = query
+        logger.debug(f"Executing query: {pg_query}")
         
         # Identify boolean columns and convert integer parameters (0/1) to boolean values
         # Use specific known boolean columns from our database schema

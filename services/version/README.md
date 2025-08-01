@@ -65,7 +65,7 @@ The version manager is integrated into `main.py`:
 - **Singleton Pattern**: Ensures consistent version state across the application
 - **Thread-Safe**: Safe for concurrent access with locks
 - **Automatic Cleanup**: Handles cleanup on application shutdown
-- **Database Agnostic**: Works with both SQLite and PostgreSQL
+- **PostgreSQL Support**: Works with PostgreSQL database
 - **Graceful Handling**: Provides clean shutdown when version conflicts are detected
 
 ## Benefits

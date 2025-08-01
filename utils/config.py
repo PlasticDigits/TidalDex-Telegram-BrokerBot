@@ -53,23 +53,14 @@ API_PORT: int = int(get_env_var('API_PORT', 10000))  # Default: render.com expec
 DEFAULT_DERIVATION_PATH: str = "m/44'/60'/0'/0/0"  # Default path for first Ethereum account
 ACCOUNT_PATH_TEMPLATE: str = "m/44'/60'/0'/0/{}"   # Template for deriving multiple accounts
 
-# Database settings
-DB_TYPE: str = get_env_var('DB_TYPE', 'sqlite3').lower()  # Database type: sqlite3 or postgresql
-DB_NAME: str = get_env_var('DB_NAME', 'tidaldex.db')  # Database name or path for SQLite
-DB_HOST: str = get_env_var('DB_HOST', 'localhost')  # Database host for PostgreSQL
-DB_PORT: int = int(get_env_var('DB_PORT', '5432'))  # Database port for PostgreSQL
-DB_USER: str = get_env_var('DB_USER', 'postgres')  # Database user for PostgreSQL
-DB_PASSWORD: str = get_env_var('DB_PASSWORD', 'postgres')  # Database password for PostgreSQL
+# Database settings - PostgreSQL only
+DB_NAME: str = get_env_var('DB_NAME', 'tidaldex')  # PostgreSQL database name
+DB_HOST: str = get_env_var('DB_HOST', 'localhost')  # Database host
+DB_PORT: int = int(get_env_var('DB_PORT', '5432'))  # Database port
+DB_USER: str = get_env_var('DB_USER', 'postgres')  # Database user
+DB_PASSWORD: str = get_env_var('DB_PASSWORD', 'postgres')  # Database password
 
-# For backward compatibility
-DATABASE_PATH: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', DB_NAME)
+# Database connection settings
 DATABASE_RETRY_MAX_ATTEMPTS: int = 5  # Maximum number of retries for database operations
 DATABASE_RETRY_INITIAL_WAIT: float = 0.1  # Initial wait between retries in seconds (doubles with each retry)
-DATABASE_CONNECTION_TIMEOUT: float = 30.0  # Connection timeout in seconds
-
-# SQLite PRAGMA settings
-DB_PRAGMAS: Dict[str, Union[str, int]] = {
-    "journal_mode": "MEMORY",  # In-memory journal for speed
-    "cache_size": 10000,       # Larger cache for better performance
-    "temp_store": "MEMORY",    # Store temp tables in memory
-} 
+DATABASE_CONNECTION_TIMEOUT: float = 30.0  # Connection timeout in seconds 

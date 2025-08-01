@@ -29,14 +29,18 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
     
     # First, ensure the token exists in the tokens table
     token_query = """
-    INSERT OR REPLACE INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO tokens (token_address, token_symbol, token_name, token_decimals, chain_id)
+    VALUES (%s, %s, %s, %s, %s)
+    ON CONFLICT (token_address, chain_id) DO UPDATE SET
+        token_symbol = EXCLUDED.token_symbol,
+        token_name = EXCLUDED.token_name,
+        token_decimals = EXCLUDED.token_decimals
     """
     
     execute_query(token_query, (token_address, symbol, name, decimals, chain_id))
 
     # Then, get the token_id
-    get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
+    get_token_id_query = "SELECT id FROM tokens WHERE token_address = %s AND chain_id = %s"
     token_result = execute_query(get_token_id_query, (token_address, chain_id), fetch='one')
     
     if not token_result:
@@ -46,8 +50,9 @@ def track_token(user_id: str, token_address: str, chain_id: int = 56,
 
     # Finally, add to user_tracked_tokens
     track_query = """
-    INSERT OR IGNORE INTO user_tracked_tokens (user_id, token_id)
-    VALUES (?, ?)
+    INSERT INTO user_tracked_tokens (user_id, token_id)
+    VALUES (%s, %s)
+    ON CONFLICT (user_id, token_id) DO NOTHING
     """
     execute_query(track_query, (user_id, token_id))
 
@@ -57,14 +62,14 @@ def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
     # First, hash the user_id
     user_id = hash_user_id(user_id)
     # Get the token_id
-    get_token_id_query = "SELECT id FROM tokens WHERE token_address = ? AND chain_id = ?"
+    get_token_id_query = "SELECT id FROM tokens WHERE token_address = %s AND chain_id = %s"
     token_result = execute_query(get_token_id_query, (token_address, chain_id))
     if not token_result:
         return  # Token not found, nothing to untrack
     token_id = token_result[0]['id']
     
     # Remove from user_tracked_tokens
-    untrack_query = "DELETE FROM user_tracked_tokens WHERE user_id = ? AND token_id = ?"
+    untrack_query = "DELETE FROM user_tracked_tokens WHERE user_id = %s AND token_id = %s"
     execute_query(untrack_query, (user_id, token_id))
 
 @retry_decorator(5, 0.1)
@@ -77,7 +82,7 @@ def get_tracked_tokens(user_id: str) -> List[TokenInfo]:
            t.token_decimals as decimals, t.chain_id
     FROM tokens t
     JOIN user_tracked_tokens utt ON t.id = utt.token_id
-    WHERE utt.user_id = ?
+    WHERE utt.user_id = %s
     """
     result = execute_query(query, (user_id,), fetch='all')
     if not result:
@@ -99,7 +104,7 @@ def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bo
     SELECT 1 
     FROM user_tracked_tokens utt
     JOIN tokens t ON t.id = utt.token_id
-    WHERE utt.user_id = ? AND t.token_address = ? AND t.chain_id = ?
+    WHERE utt.user_id = %s AND t.token_address = %s AND t.chain_id = %s
     """
     result = execute_query(query, (user_id, token_address, chain_id))
     if result == -1:
@@ -121,7 +126,7 @@ def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dic
     query = """
     SELECT id, token_address, token_symbol, token_name, token_decimals, chain_id
     FROM tokens
-    WHERE token_address = ? AND chain_id = ?
+    WHERE token_address = %s AND chain_id = %s
     """
     result = execute_query(query, (token_address, chain_id), fetch='one')
     
