@@ -1,0 +1,56 @@
+{
+  "name": "blockchain_app_response",
+  "description": "Response schema for blockchain app assistant interactions",
+  "strict": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "response_type": {
+        "type": "string",
+        "enum": ["chat", "view_call", "write_call"],
+        "description": "Type of response - chat for conversation, view_call for read operations, write_call for transactions"
+      },
+      "message": {
+        "type": "string",
+        "description": "Human-readable message to display to the user"
+      },
+      "contract_call": {
+        "type": "object",
+        "description": "Contract method call details (required for view_call and write_call)",
+        "properties": {
+          "contract": {
+            "type": "string",
+            "description": "Name of the contract to call (must match app config)"
+          },
+          "method": {
+            "type": "string",
+            "description": "Name of the contract method to call"
+          },
+          "parameters": {
+            "type": "object",
+            "description": "Method parameters as key-value pairs",
+            "additionalProperties": true
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Human-readable explanation of what this contract call does"
+          }
+        },
+        "required": ["contract", "method", "parameters", "explanation"],
+        "additionalProperties": false
+      }
+    },
+    "required": ["response_type", "message"],
+    "additionalProperties": false,
+    "if": {
+      "properties": {
+        "response_type": {
+          "enum": ["view_call", "write_call"]
+        }
+      }
+    },
+    "then": {
+      "required": ["response_type", "message", "contract_call"]
+    }
+  }
+}

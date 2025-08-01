@@ -1,0 +1,197 @@
+{
+  "name": "swap",
+  "description": "TidalDex token swapping interface - Trade any supported tokens with ease",
+  "contracts": {
+    "router": {
+      "address_env_var": "DEX_ROUTER_ADDRESS",
+      "abi_file": "abi/TidalDexRouter.json"
+    }
+  },
+  "available_methods": {
+    "view": [
+      {
+        "name": "getAmountsOut",
+        "description": "Get expected output amounts for a swap path",
+        "inputs": ["amountIn", "path"],
+        "contract": "router"
+      },
+      {
+        "name": "getAmountsIn",
+        "description": "Get required input amounts for a desired output",
+        "inputs": ["amountOut", "path"],
+        "contract": "router"
+      },
+      {
+        "name": "factory",
+        "description": "Get the factory contract address",
+        "inputs": [],
+        "contract": "router"
+      }
+    ],
+    "write": [
+      {
+        "name": "swapExactTokensForTokens",
+        "description": "Swap exact amount of tokens for tokens",
+        "inputs": ["amountIn", "amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "requires_token_approval": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "path[0]",
+            "amount_param": "amountIn",
+            "direction": "input",
+            "display_as": "Swap {amount} {symbol}"
+          },
+          {
+            "token_param": "path[-1]",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      },
+      {
+        "name": "swapExactETHForTokens",
+        "description": "Swap exact BNB for tokens",
+        "inputs": ["amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "payable": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "BNB",
+            "amount_param": "value_wei",
+            "direction": "input",
+            "display_as": "Swap {amount} BNB"
+          },
+          {
+            "token_param": "path[-1]",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      },
+      {
+        "name": "swapExactTokensForETH",
+        "description": "Swap exact tokens for BNB",
+        "inputs": ["amountIn", "amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "requires_token_approval": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "path[0]",
+            "amount_param": "amountIn",
+            "direction": "input",
+            "display_as": "Swap {amount} {symbol}"
+          },
+          {
+            "token_param": "BNB",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} BNB"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      },
+      {
+        "name": "swapExactTokensForTokensSupportingFeeOnTransferTokens",
+        "description": "Swap exact tokens for tokens (supports fee-on-transfer tokens)",
+        "inputs": ["amountIn", "amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "requires_token_approval": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "path[0]",
+            "amount_param": "amountIn",
+            "direction": "input",
+            "display_as": "Swap {amount} {symbol}"
+          },
+          {
+            "token_param": "path[-1]",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      },
+      {
+        "name": "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        "description": "Swap exact BNB for tokens (supports fee-on-transfer tokens)",
+        "inputs": ["amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "payable": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "BNB",
+            "amount_param": "value_wei",
+            "direction": "input",
+            "display_as": "Swap {amount} BNB"
+          },
+          {
+            "token_param": "path[-1]",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      },
+      {
+        "name": "swapExactTokensForETHSupportingFeeOnTransferTokens",
+        "description": "Swap exact tokens for BNB (supports fee-on-transfer tokens)",
+        "inputs": ["amountIn", "amountOutMin", "path", "to", "deadline"],
+        "contract": "router",
+        "requires_token_approval": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "path[0]",
+            "amount_param": "amountIn",
+            "direction": "input",
+            "display_as": "Swap {amount} {symbol}"
+          },
+          {
+            "token_param": "BNB",
+            "amount_param": "amountOutMin",
+            "direction": "output",
+            "display_as": "for at least {amount} BNB"
+          }
+        ],
+        "human_summary": "{input} {output}"
+      }
+    ]
+  },
+  "parameter_processing": {
+    "amountIn": {
+      "type": "token_amount",
+      "convert_from_human": true,
+      "get_decimals_from": "path[0]"
+    },
+    "amountOutMin": {
+      "type": "token_amount",
+      "convert_from_human": true,
+      "get_decimals_from": "path[-1]"
+    },
+    "value_wei": {
+      "type": "token_amount",
+      "convert_from_human": true,
+      "get_decimals_from": "BNB"
+    },
+    "to": {
+      "type": "address",
+      "default": "user_wallet_address"
+    },
+    "deadline": {
+      "type": "timestamp",
+      "default": "current_time + 5_minutes"
+    }
+  }
+}

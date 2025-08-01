@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "App Configuration Schema",
+  "description": "Schema for declarative blockchain app configurations",
+  "type": "object",
+  "required": ["name", "description", "contracts", "available_methods"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique identifier for the app"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this app does"
+    },
+    "contracts": {
+      "type": "object",
+      "description": "Contract addresses and ABIs used by this app",
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "required": ["address_env_var", "abi_file"],
+          "properties": {
+            "address_env_var": {
+              "type": "string",
+              "description": "Environment variable containing the contract address"
+            },
+            "abi_file": {
+              "type": "string",
+              "description": "Filename of the ABI JSON file (relative to app directory)"
+            }
+          }
+        }
+      }
+    },
+    "available_methods": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "type": "array",
+          "description": "Read-only contract methods",
+          "items": {
+            "$ref": "#/definitions/method"
+          }
+        },
+        "write": {
+          "type": "array",
+          "description": "State-changing contract methods",
+          "items": {
+            "allOf": [
+              { "$ref": "#/definitions/method" },
+              {
+                "properties": {
+                  "requires_token_approval": {
+                    "type": "boolean",
+                    "description": "Whether this method requires token approval first"
+                  },
+                  "payable": {
+                    "type": "boolean",
+                    "description": "Whether this method accepts native token (BNB/ETH) value"
+                  },
+                  "gas_estimate": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "Relative gas usage estimate"
+                  },
+                  "token_amount_pairs": {
+                    "type": "array",
+                    "description": "Token/amount parameter relationships",
+                    "items": {
+                      "$ref": "#/definitions/token_amount_pair"
+                    }
+                  },
+                  "human_summary": {
+                    "type": "string",
+                    "description": "Template for combining token/amount pairs into human summary"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "parameter_processing": {
+      "type": "object",
+      "description": "Rules for processing method parameters",
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "token_amount",
+                "token_address",
+                "timestamp",
+                "address",
+                "uint256",
+                "string"
+              ]
+            },
+            "convert_from_human": {
+              "type": "boolean",
+              "description": "Whether to convert from human-readable format"
+            },
+            "get_decimals_from": {
+              "type": "string",
+              "description": "Parameter reference to get token decimals from"
+            },
+            "default": {
+              "type": "string",
+              "description": "Default value or generation rule"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "method": {
+      "type": "object",
+      "required": ["name", "description", "inputs"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Contract method name"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this method does"
+        },
+        "inputs": {
+          "type": "array",
+          "description": "Method parameter names",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contract": {
+          "type": "string",
+          "description": "Which contract this method belongs to (defaults to first contract)"
+        }
+      }
+    },
+    "token_amount_pair": {
+      "type": "object",
+      "required": ["token_param", "amount_param", "direction", "display_as"],
+      "properties": {
+        "token_param": {
+          "type": "string",
+          "description": "Parameter reference for token address (e.g., 'path[0]', 'tokenAddress')"
+        },
+        "amount_param": {
+          "type": "string",
+          "description": "Parameter reference for amount (e.g., 'amountIn', 'value_wei')"
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["input", "output", "payment", "stake", "withdraw"],
+          "description": "Type of token flow"
+        },
+        "display_as": {
+          "type": "string",
+          "description": "Template for displaying this pair (use {amount}, {symbol}, and other params)"
+        }
+      }
+    }
+  }
+}

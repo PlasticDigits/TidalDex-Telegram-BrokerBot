@@ -83,6 +83,11 @@ from commands.swap import (
     CHOOSING_FROM_TOKEN, CHOOSING_TO_TOKEN, ENTERING_AMOUNT, ENTERING_SLIPPAGE, CONFIRMING_SWAP,
     swap_command
 )
+# Import app command for conversational blockchain interactions
+from commands.app import (
+    app_command, handle_app_choice, handle_conversation, handle_transaction_confirmation,
+    cancel_app_conversation, CHOOSING_APP, CONVERSING, CONFIRMING_TRANSACTION
+)
 # Import X account management command
 from commands.x import (
     x_command, x_conv_handler, cancel_x_command, x_action_callback,
@@ -249,6 +254,7 @@ def main() -> None:
 
     # private chat wrappers for pin protected commands with ConversationHandler
     swap_wrapper = create_private_chat_wrapper(swap_command)
+    app_wrapper = create_private_chat_wrapper(app_command)
 
     # private chat wrappers for pin protected commands
     addwallet_wrapper = create_private_chat_wrapper(addwallet_command)
@@ -415,6 +421,29 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
+    # Add conversation handler for blockchain apps
+    app_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("app", app_wrapper)],
+        states={
+            PIN_REQUEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            PIN_FAILED: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
+            ],
+            CHOOSING_APP: [
+                CallbackQueryHandler(handle_app_choice, pattern=r'^app_(start_.*|cancel)$')
+            ],
+            CONVERSING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation)
+            ],
+            CONFIRMING_TRANSACTION: [
+                CallbackQueryHandler(handle_transaction_confirmation, pattern=r'^app_(confirm_.*|cancel_.*)$')
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_app_conversation)]
+    )
+    
     application.add_handler(send_conv_handler)
     application.add_handler(recover_conv_handler)
     application.add_handler(wallets_conv_handler)
@@ -422,6 +451,7 @@ def main() -> None:
     application.add_handler(rename_wallet_conv_handler)
     application.add_handler(set_pin_conv_handler)
     application.add_handler(swap_conv_handler)
+    application.add_handler(app_conv_handler)
     
     # Add X conversation handler with proper configuration
     x_conv_handler_configured = ConversationHandler(
