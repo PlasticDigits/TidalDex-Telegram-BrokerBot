@@ -50,6 +50,21 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     
     wallet_address: str = user_wallet['address']
+    
+    # Check if address decryption failed
+    if not wallet_address:
+        await message.reply_text(
+            f"⚠️ **Address Decryption Issue**\n\n"
+            f"Unable to decrypt wallet address for '{wallet_name}'. This may be due to:\n"
+            f"• PIN mismatch\n"
+            f"• Corrupted wallet data\n\n"
+            f"Please try:\n"
+            f"1. Setting your PIN again with /set_pin\n"
+            f"2. If the issue persists, contact support\n\n"
+            f"Use /wallets to check other wallets."
+        )
+        return
+        
     await message.reply_text(f"Fetching balances for {wallet_name}...")
 
     httpxClient: httpx.AsyncClient = httpx.AsyncClient()

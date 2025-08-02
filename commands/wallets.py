@@ -6,13 +6,20 @@ import logging
 from typing import Dict, List, Any, Optional, cast
 from db.wallet import WalletData
 from services.pin.pin_decorators import conversation_pin_helper
-from db.utils import hash_user_id
+from db.utils import hash_user_id, test_secure_encryption
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
 # Define conversation state
 SELECTING_WALLET = 1
+
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for MarkdownV2 formatting."""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
 
 async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """List all wallets and allow switching between them."""
@@ -28,6 +35,10 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id: int = user.id
     user_id_str: str = str(user_id)
     pin: Optional[str] = pin_manager.get_pin(user_id)
+    
+    # Test secure encryption
+    if not test_secure_encryption(user_id, pin):
+        logger.error(f"❌ Secure encryption test FAILED for user {hash_user_id(user_id)}")
     
     # Get the current active wallet name
     active_wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(user_id_str)
@@ -54,8 +65,10 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         active_marker: str = "✅ " if is_active else ""
         
         # Limit the displayed address to first and last few characters
-        address: str = wallet_data.get('address', '')
-        if len(address) > 15:
+        address: str = wallet_data.get('address', '') or ''
+        if not address:
+            address = "Unable to decrypt"
+        elif len(address) > 15:
             address = f"{address[:8]}...{address[-6:]}"
         
         label: str = f"{active_marker}{wallet_name} ({address})"
@@ -116,18 +129,34 @@ async def wallet_selection_callback(update: Update, context: ContextTypes.DEFAUL
     success: bool = wallet_manager.set_active_wallet(user_id_str, selected_wallet_name)
     
     if success:
-        address: str = wallet.get('address', '')
+        address: str = wallet.get('address', '') or ''
+        
+        if not address:
+            escaped_wallet_name = escape_markdown_v2(selected_wallet_name)
+            await query.edit_message_text(
+                f"✅ Wallet '{escaped_wallet_name}' is now active\\.\n\n"
+                f"⚠️ **Address Decryption Issue**: Unable to decrypt wallet address\\. Please contact support\\.\n\n"
+                f"Use /wallet to see details, /addwallet to add a new wallet\\.\n\n"
+                f"🔐 **Security**\n"
+                f"• Use /set\\_pin to set or change a PIN for your wallet\n"
+                f"• Use /backup to save your recovery phrase\n",
+                parse_mode='MarkdownV2'
+            )
+        else:
+            # Escape special characters for MarkdownV2
+            escaped_wallet_name = escape_markdown_v2(selected_wallet_name)
+            escaped_address = escape_markdown_v2(address)
             
-        await query.edit_message_text(
-            f"✅ Wallet '{selected_wallet_name}' is now active\\.\n\n"
-            f"Address: `{address}`\n\n"
-            f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds\\.\n\n"
-            f"Use /swap to trade BNB or tokens\\.\n\n"
-            f"🔐 **Security**\n"
-            f"• Use /set\\_pin to set or change a PIN for your wallet\n"
-            f"• Use /backup to save your recovery phrase\n",
-            parse_mode='MarkdownV2'
-        )
+            await query.edit_message_text(
+                f"✅ Wallet '{escaped_wallet_name}' is now active\\.\n\n"
+                f"Address: `{escaped_address}`\n\n"
+                f"Use /wallet to see details, /addwallet to add a new wallet, /receive to receive funds, /balance to check your balances, or /send to send funds\\.\n\n"
+                f"Use /swap to trade BNB or tokens\\.\n\n"
+                f"🔐 **Security**\n"
+                f"• Use /set\\_pin to set or change a PIN for your wallet\n"
+                f"• Use /backup to save your recovery phrase\n",
+                parse_mode='MarkdownV2'
+            )
     else:
         await query.edit_message_text(
             f"Error setting '{selected_wallet_name}' as active wallet. Please try again."

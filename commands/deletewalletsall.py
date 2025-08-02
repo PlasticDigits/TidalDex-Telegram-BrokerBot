@@ -34,9 +34,9 @@ async def deletewalletsall_command(update: Update, context: ContextTypes.DEFAULT
         return helper_result
     
     user_id: int = user.id
-    user_id_str: str = hash_user_id(user_id)
+    user_id_str: str = str(user_id)
     
-    logger.info(f"Delete all wallets command initiated by user {user_id_str}")
+    logger.info(f"Delete all wallets command initiated by user {hash_user_id(user_id)}")
     
     # Get PIN for wallet operations
     from services.pin import pin_manager
@@ -95,7 +95,7 @@ async def process_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
         
     user_id: int = user.id
-    user_id_str: str = hash_user_id(user_id)
+    user_id_str: str = str(user_id)
     
     if query.data == "delete_all_cancel":
         await query.edit_message_text(
@@ -104,7 +104,7 @@ async def process_confirmation(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     
     # User confirmed deletion
-    logger.warning(f"User {user_id_str} confirmed deletion of all wallets and keys")
+    logger.warning(f"User {hash_user_id(user_id)} confirmed deletion of all wallets and keys")
     
     # Delete all wallets and mnemonic
     success: bool = delete_wallets_all(user_id_str, None)

@@ -6,7 +6,7 @@ import traceback
 from typing import Optional, Union, Dict, Any, List, Tuple, TypedDict, cast
 from db.connections.connection import QueryResult
 from db.connection import execute_query
-from db.utils import encrypt_data, decrypt_data, hash_user_id, encrypt_address, decrypt_address, get_address_for_display, get_address_for_storage_and_retrieval, is_data_encrypted
+from db.utils import encrypt_data, decrypt_data, hash_user_id, encrypt_address, decrypt_address, get_address_for_display, get_address_for_storage_and_retrieval, is_data_encrypted, migrate_encrypted_address_if_needed
 from db.mnemonic import get_user_mnemonic
 from wallet.mnemonic import derive_wallet_from_mnemonic
 import time
@@ -77,18 +77,36 @@ def get_user_wallet(user_id: Union[int, str], wallet_name: Optional[str] = None,
         
         # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
         if wallet_data.get('address'):
+            logger.debug(f"Decrypting address for wallet '{wallet_name}': {len(wallet_data['address'])} chars")
+
             try:
-                decrypted_address: Optional[str] = get_address_for_display(wallet_data['address'], user_id, pin)
+                # Use migration-aware function
+                decrypted_address, migrated_encrypted = migrate_encrypted_address_if_needed(wallet_data['address'], user_id, pin)
+                
                 if decrypted_address:
                     wallet_data['address'] = decrypted_address
-                    logger.debug(f"Successfully processed address for wallet {wallet_name} for user {user_id_str}")
+                    logger.debug(f"Successfully decrypted address for wallet {wallet_name}")
+                    
+                    # If migration occurred, update the database
+                    if migrated_encrypted:
+                        try:
+                            execute_query(
+                                "UPDATE wallets SET address = %s WHERE user_id = %s AND name = %s",
+                                (migrated_encrypted, user_id_str, wallet_name),
+                                fetch=None
+                            )
+                            logger.info(f"🔄 DATABASE UPDATED: Migrated address to secure encryption for wallet {wallet_name}")
+                        except Exception as db_e:
+                            logger.error(f"Failed to update migrated address for wallet {wallet_name}: {db_e}")
+                            
                 else:
-                    logger.error(f"Failed to process address for wallet {wallet_name} for user {user_id_str}")
-                    # Keep original address for backwards compatibility
+                    logger.error(f"Failed to decrypt address for wallet {wallet_name} for user {user_id_str}")
+                    # Set to None to prevent showing encrypted string to user
+                    wallet_data['address'] = None
             except Exception as e:
                 logger.error(f"Error processing address for wallet {wallet_name} for user {user_id_str}: {e}")
-                logger.error(traceback.format_exc())
-                # Keep original address for backwards compatibility
+                # Set to None to prevent showing encrypted string to user  
+                wallet_data['address'] = None
         
         # Decrypt private key if present
         if wallet_data.get('private_key'):
@@ -468,14 +486,35 @@ def get_user_wallets(user_id: Union[int, str], pin: Optional[str] = None) -> Dic
                 
                 # Decrypt address if present (handles both encrypted and plain text for backwards compatibility)
                 if wallet.get('address'):
+                    wallet_name = wallet.get('name', 'Unknown')
+                    logger.debug(f"Decrypting address for wallet '{wallet_name}': {len(wallet['address'])} chars")
+
                     try:
-                        decrypted_address: Optional[str] = get_address_for_display(wallet['address'], user_id, pin)
+                        # Use migration-aware function
+                        decrypted_address, migrated_encrypted = migrate_encrypted_address_if_needed(wallet['address'], user_id, pin)
+                        
                         if decrypted_address:
                             wallet['address'] = decrypted_address
-                        # If decryption fails, keep original for backwards compatibility
+                            
+                            # If migration occurred, update the database
+                            if migrated_encrypted:
+                                try:
+                                    execute_query(
+                                        "UPDATE wallets SET address = %s WHERE user_id = %s AND name = %s",
+                                        (migrated_encrypted, user_id_str, wallet_name),
+                                        fetch=None
+                                    )
+                                    logger.info(f"🔄 DATABASE UPDATED: Migrated address to secure encryption for wallet {wallet_name}")
+                                except Exception as db_e:
+                                    logger.error(f"Failed to update migrated address for wallet {wallet_name}: {db_e}")
+                        else:
+                            logger.error(f"Failed to decrypt address for wallet in list")
+                            # Set to None instead of keeping encrypted string
+                            wallet['address'] = None
                     except Exception as e:
                         logger.error(f"Error processing address for wallet in list: {e}")
-                        # Keep original address for backwards compatibility
+                        # Set to None instead of keeping encrypted string
+                        wallet['address'] = None
                 
                 # Mark as active if this wallet's id matches the active_wallet_id
                 wallet_id = wallet.pop('id', None)  # Remove id from the result
@@ -668,10 +707,14 @@ def get_user_wallets_with_keys(user_id: Union[int, str], pin: Optional[str] = No
                         decrypted_address: Optional[str] = get_address_for_display(wallet_dict['address'], user_id, pin)
                         if decrypted_address:
                             wallet_dict['address'] = decrypted_address
-                        # If decryption fails, keep original for backwards compatibility
+                        else:
+                            logger.error(f"Failed to decrypt address for wallet {name}")
+                            # Set to None instead of keeping encrypted string
+                            wallet_dict['address'] = None
                     except Exception as e:
                         logger.error(f"Error processing address for wallet {name}: {e}")
-                        # Keep original address for backwards compatibility
+                        # Set to None instead of keeping encrypted string
+                        wallet_dict['address'] = None
                 
                 # Decrypt private key if present
                 if wallet_dict.get('private_key'):

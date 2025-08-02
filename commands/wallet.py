@@ -13,6 +13,13 @@ from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
+def escape_markdown_v2(text: str) -> str:
+    """Escape special characters for MarkdownV2 formatting."""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Display wallet information or create a wallet if none exists.
@@ -50,7 +57,9 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         private_key_wallets: List[str] = []
         mnemonic_wallets: List[str] = []
         for name, wallet_data in all_wallets.items():
-            line: str = f"{name}: `{wallet_data.get('address', '')}`"
+            escaped_name = escape_markdown_v2(name)
+            escaped_address = escape_markdown_v2(wallet_data.get('address', ''))
+            line: str = f"{escaped_name}: `{escaped_address}`"
             if name == wallet_name:
                 line = f"✅ **{line}**"
             if wallet_data.get('derivation_path'):
@@ -90,10 +99,13 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             if new_wallet and update.message is not None:
                 new_wallet_address: str = new_wallet.get('address', '')
+                # Escape special characters for MarkdownV2
+                escaped_wallet_name = escape_markdown_v2(new_wallet_name)
+                escaped_address = escape_markdown_v2(new_wallet_address)
                 # use MarkdownV2 without html or error handling
                 await update.message.reply_text(
-                    f"✅ Created a new wallet named '{new_wallet_name}'\n\n"
-                    f"Address: `{new_wallet_address}`\n\n"
+                    f"✅ Created a new wallet named '{escaped_wallet_name}'\n\n"
+                    f"Address: `{escaped_address}`\n\n"
                     "You can now use /send to send funds and /receive to view your address\\.\n"
                     "Use /swap to trade BNB or tokens\\.\n"
                     "Use /addwallet to create additional wallets\\.\n\n"

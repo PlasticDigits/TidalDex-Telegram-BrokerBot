@@ -7,7 +7,7 @@ import logging
 import os
 import traceback
 from typing import Optional, Union, Any, Dict, List, Tuple, cast
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from utils.config import ENCRYPTION_KEY
@@ -15,7 +15,7 @@ from utils.config import ENCRYPTION_KEY
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str] = None) -> bytes:
+def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str] = None, legacy_mode: bool = False) -> bytes:
     """
     Generate a Fernet encryption key based on user_id, optional PIN, and salt.
     Uses PIN if provided or if user has one set.
@@ -24,6 +24,7 @@ def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str]
         salt: Salt for key derivation
         user_id: User identifier (additional entropy)
         pin: User's PIN for additional security
+        legacy_mode: If True, use old insecure PIN encryption for backward compatibility
         
     Returns:
         A Fernet-compatible 32-byte key
@@ -34,16 +35,18 @@ def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str]
     # Ensure ENCRYPTION_KEY is in bytes format
     encryption_key_bytes: bytes = ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
     
-    # Default combined input with encryption key and user ID
-    combined_input: bytes = encryption_key_bytes + b":" + user_id_bytes
-    
-    # If a PIN is provided directly, use it
     if pin:
-        # Log that we're using a provided PIN
-        logger.debug(f"Using provided PIN for encryption/decryption for user {hash_user_id(user_id)}")
-        # Combine user_id and PIN for better security
         pin_bytes: bytes = str(pin).encode()
-        combined_input = user_id_bytes + b":" + pin_bytes
+        
+        if legacy_mode:
+            # OLD INSECURE METHOD: PIN encryption without ENCRYPTION_KEY (for backward compatibility)
+            combined_input = user_id_bytes + b":" + pin_bytes
+        else:
+            # NEW SECURE METHOD: PIN encryption includes ENCRYPTION_KEY
+            combined_input = encryption_key_bytes + b":" + user_id_bytes + b":" + pin_bytes
+    else:
+        # No PIN: Always secure (already included ENCRYPTION_KEY)
+        combined_input: bytes = encryption_key_bytes + b":" + user_id_bytes
 
     password: bytes = hashlib.sha256(combined_input).digest()
     
@@ -57,6 +60,45 @@ def get_encryption_key(salt: bytes, user_id: Union[int, str], pin: Optional[str]
     
     key: bytes = base64.urlsafe_b64encode(kdf.derive(password))
     return key
+
+def test_secure_encryption(user_id: Union[int, str], pin: Optional[str] = None) -> bool:
+    """
+    Test if the new secure encryption/decryption works correctly.
+    
+    Args:
+        user_id: User identifier to test with
+        pin: PIN to test with (if any)
+        
+    Returns:
+        True if secure encryption works, False otherwise
+    """
+    try:
+        test_data = "test_secure_encryption_data_123"
+        user_hash = hash_user_id(user_id)
+        
+        # Try encrypting with new secure method
+        encrypted = encrypt_data(test_data, user_id, pin)
+        if not encrypted:
+            logger.error(f"Failed to encrypt test data for user {user_hash}")
+            return False
+        
+        # Try decrypting with new secure method
+        decrypted = decrypt_data(encrypted, user_id, pin)
+        if not decrypted:
+            logger.error(f"Failed to decrypt test data for user {user_hash}")
+            return False
+        
+        # Verify data matches
+        if decrypted == test_data:
+            logger.info(f"SUCCESS: Secure encryption test passed for user {user_hash}")
+            return True
+        else:
+            logger.error(f"Decrypted data doesn't match original for user {user_hash}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Secure encryption test failed for user {user_hash}: {e}")
+        return False
 
 def encrypt_data(data: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """
@@ -77,8 +119,9 @@ def encrypt_data(data: str, user_id: Union[int, str], pin: Optional[str] = None)
         # Generate a random salt for this encryption
         salt: bytes = os.urandom(16)
         
-        # Get encryption key
-        key: bytes = get_encryption_key(salt, user_id, pin)
+        # Get encryption key using HASHED user_id for security
+        user_hash = hash_user_id(user_id)
+        key: bytes = get_encryption_key(salt, user_hash, pin)
         
         # Create a Fernet cipher and encrypt
         f = Fernet(key)
@@ -94,7 +137,7 @@ def encrypt_data(data: str, user_id: Union[int, str], pin: Optional[str] = None)
 
 def decrypt_data(encrypted_data: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """
-    Decrypt Fernet-encrypted data.
+    Decrypt Fernet-encrypted data with backward compatibility for different user_id formats.
     
     Args:
         encrypted_data: Base64-encoded encrypted data with salt
@@ -104,8 +147,10 @@ def decrypt_data(encrypted_data: str, user_id: Union[int, str], pin: Optional[st
     Returns:
         Decrypted data as string or None if decryption fails
     """
+    user_hash = hash_user_id(user_id)
+    
     if not encrypted_data:
-        logger.warning(f"No encrypted data provided for user {hash_user_id(user_id)}")
+        logger.warning(f"No encrypted data provided for user {user_hash}")
         return None
     
     try:
@@ -116,22 +161,71 @@ def decrypt_data(encrypted_data: str, user_id: Union[int, str], pin: Optional[st
         salt: bytes = decoded[:16]
         ciphertext: bytes = decoded[16:]
         
+        logger.debug(f"Encrypted data analysis for user {user_hash}: {len(encrypted_data)} chars, salt: {salt.hex()}")
+        
+        # STEP 1: Try with HASHED user_id first (current standard)
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_hash, pin, user_hash, legacy_mode=False)
+        if result:
+            return result
+        
+        # STEP 2: Try LEGACY decryption with hashed user_id if PIN is present
+        if pin:
+            result = _try_decrypt_with_user_id(salt, ciphertext, user_hash, pin, user_hash, legacy_mode=True)
+            if result:
+                return result
+        
+        # STEP 3: Try backward compatibility with raw user_id (old format)
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_id, pin, user_hash, legacy_mode=False)
+        if result:
+            return result
+        
+        # STEP 4: Try LEGACY decryption with raw user_id if PIN is present
+        if pin:
+            result = _try_decrypt_with_user_id(salt, ciphertext, user_id, pin, user_hash, legacy_mode=True)
+            if result:
+                return result
+        
+        # STEP 5: Try other backward compatibility variants
+        user_id_variants = []
+        if isinstance(user_id, str) and user_id.isdigit():
+            user_id_variants.append(("int", int(user_id)))
+        elif isinstance(user_id, int):
+            user_id_variants.append(("str", str(user_id)))
+        
+        for variant_type, variant_user_id in user_id_variants:
+            # Try secure mode first
+            result = _try_decrypt_with_user_id(salt, ciphertext, variant_user_id, pin, user_hash, legacy_mode=False)
+            if result:
+                return result
+            
+            # Try legacy mode
+            if pin:
+                result = _try_decrypt_with_user_id(salt, ciphertext, variant_user_id, pin, user_hash, legacy_mode=True)
+                if result:
+                    return result
+        
+        # If all attempts failed, log basic error info
+        logger.error(f"Failed to decrypt data for user {user_hash}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error decrypting data for user {user_hash}: {e}")
+        return None
+
+def _try_decrypt_with_user_id(salt: bytes, ciphertext: bytes, user_id: Union[int, str], pin: Optional[str], user_hash: str, legacy_mode: bool = False) -> Optional[str]:
+    """
+    Helper function to try decryption with a specific user_id format and encryption mode.
+    """
+    try:
         # Get encryption key
-        key: bytes = get_encryption_key(salt, user_id, pin)
+        key: bytes = get_encryption_key(salt, user_id, pin, legacy_mode=legacy_mode)
         
         # Create a Fernet cipher and decrypt
         f = Fernet(key)
         
-        try:
-            decrypted_data: str = f.decrypt(ciphertext).decode('utf-8')
-            logger.debug(f"Successfully decrypted data for user {hash_user_id(user_id)}")
-            return decrypted_data
-        except Exception as e:
-            logger.error(f"Decryption failed for user {hash_user_id(user_id)}: {e}")
-            return None
-    except Exception as e:
-        logger.error(f"Error in decrypt_data for user {hash_user_id(user_id)}: {e}")
-        logger.error(traceback.format_exc())
+        decrypted_data: str = f.decrypt(ciphertext).decode('utf-8')
+        return decrypted_data
+    except Exception:
         return None
 
 def is_data_encrypted(data: str) -> bool:
@@ -232,6 +326,132 @@ def get_address_for_storage_and_retrieval(address: str, user_id: Union[int, str]
     encrypted = encrypt_address(address, user_id, pin)
     return encrypted, False
 
+def decrypt_data_with_migration_info(encrypted_data: str, user_id: Union[int, str], pin: Optional[str] = None) -> Tuple[Optional[str], bool]:
+    """
+    Decrypt data and return both decrypted value and whether legacy mode was used.
+    
+    Args:
+        encrypted_data: The encrypted data
+        user_id: User identifier  
+        pin: User's PIN
+        
+    Returns:
+        Tuple of (decrypted_data, used_legacy_mode)
+    """
+    if not encrypted_data:
+        return None, False
+    
+    user_hash = hash_user_id(user_id)
+    
+    try:
+        # Decode from base64
+        decoded: bytes = base64.b64decode(encrypted_data)
+        
+        # Extract salt (first 16 bytes) and ciphertext
+        salt: bytes = decoded[:16]
+        ciphertext: bytes = decoded[16:]
+        
+        # Try with HASHED user_id first (current standard)
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_hash, pin, user_hash, legacy_mode=False)
+        if result:
+            return result, False
+        
+        # Try LEGACY decryption with hashed user_id if PIN is present
+        if pin:
+            result = _try_decrypt_with_user_id(salt, ciphertext, user_hash, pin, user_hash, legacy_mode=True)
+            if result:
+                logger.info(f"LEGACY decryption succeeded with hashed user_id for user {user_hash} - migrating to secure")
+                return result, True
+        
+        # Try backward compatibility with raw user_id (old format)
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_id, pin, user_hash, legacy_mode=False)
+        if result:
+            return result, False
+        
+        # Try LEGACY decryption with raw user_id if PIN is present
+        if pin:
+            result = _try_decrypt_with_user_id(salt, ciphertext, user_id, pin, user_hash, legacy_mode=True)
+            if result:
+                logger.info(f"LEGACY decryption succeeded with raw user_id for user {user_hash} - migrating to secure")
+                return result, True
+        
+        # Try other backward compatibility variants
+        user_id_variants = []
+        if isinstance(user_id, str) and user_id.isdigit():
+            user_id_variants.append(("int", int(user_id)))
+        elif isinstance(user_id, int):
+            user_id_variants.append(("str", str(user_id)))
+        
+        for variant_type, variant_user_id in user_id_variants:
+            # Try secure mode first
+            result = _try_decrypt_with_user_id(salt, ciphertext, variant_user_id, pin, user_hash, legacy_mode=False)
+            if result:
+                return result, False
+            
+            # Try legacy mode
+            if pin:
+                result = _try_decrypt_with_user_id(salt, ciphertext, variant_user_id, pin, user_hash, legacy_mode=True)
+                if result:
+                    logger.info(f"LEGACY decryption succeeded with {variant_type} user_id for user {user_hash} - migrating to secure")
+                    return result, True
+        
+        # Try without PIN entirely (for wallets encrypted without PIN)
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_hash, None, user_hash, legacy_mode=False)
+        if result:
+            return result, False
+        
+        result = _try_decrypt_with_user_id(salt, ciphertext, user_id, None, user_hash, legacy_mode=False)
+        if result:
+            return result, False
+        
+        return None, False
+        
+    except Exception as e:
+        logger.error(f"Error decrypting data for user {user_hash}: {e}")
+        return None, False
+
+def migrate_encrypted_address_if_needed(stored_address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Decrypt address and return both decrypted value and migrated encrypted value if migration occurred.
+    
+    Args:
+        stored_address: The encrypted address from database
+        user_id: User identifier
+        pin: User's PIN
+        
+    Returns:
+        Tuple of (decrypted_address, new_encrypted_address_if_migrated)
+        If no migration occurred, new_encrypted_address_if_migrated will be None
+    """
+    if not stored_address:
+        return None, None
+    
+    user_hash = hash_user_id(user_id)
+    
+    if is_data_encrypted(stored_address):
+        # Use the migration-aware function
+        decrypted, used_legacy = decrypt_data_with_migration_info(stored_address, user_id, pin)
+        
+        if decrypted and used_legacy:
+            # Only migrate if we actually used legacy mode
+            secure_encrypted = encrypt_data(decrypted, user_id, pin)
+            if secure_encrypted:
+                logger.info(f"🔄 ADDRESS MIGRATION: Legacy address migrated to secure for user {user_hash}")
+                return decrypted, secure_encrypted
+            else:
+                logger.error(f"🔄 MIGRATION FAILED: Could not create secure encryption for user {user_hash}")
+                return decrypted, None
+        else:
+            # Either failed to decrypt or already using secure mode
+            return decrypted, None
+    else:
+        # Plain text address - encrypt it for future security
+        encrypted_address = encrypt_address(stored_address, user_id, pin)
+        if encrypted_address:
+            return stored_address, encrypted_address
+        else:
+            return stored_address, None
+
 def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: Optional[str] = None) -> Optional[str]:
     """
     Get address for display, handling both encrypted and plain text addresses.
@@ -245,11 +465,15 @@ def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: 
     Returns:
         Plain text address for display
     """
+    user_hash = hash_user_id(user_id)
+    
     if not stored_address:
         return None
     
     # Check if address is encrypted
-    if is_data_encrypted(stored_address):
+    is_encrypted = is_data_encrypted(stored_address)
+    
+    if is_encrypted:
         # Try to decrypt with PIN first (normal case)
         if pin:
             decrypted = decrypt_address(stored_address, user_id, pin)
@@ -259,14 +483,17 @@ def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: 
         # Try without PIN (for addresses encrypted without PIN)
         decrypted_no_pin = decrypt_address(stored_address, user_id, None)
         if decrypted_no_pin:
-            logger.debug(f"Successfully decrypted address without PIN for user {hash_user_id(user_id)}")
+            logger.debug(f"Successfully decrypted address without PIN for user {user_hash}")
             return decrypted_no_pin
         
-        logger.error(f"Failed to decrypt address for user {hash_user_id(user_id)}")
+        # The backward compatibility logic is already handled in decrypt_data()
+        # No need to repeat it here to avoid recursion
+        
+        logger.error(f"Failed to decrypt address for user {user_hash}")
         return None
     else:
         # Plain text address - encrypt it for future security and update database
-        logger.info(f"Plain text address found for user {hash_user_id(user_id)}, encrypting on access")
+        logger.info(f"Plain text address found for user {user_hash}, encrypting on access")
         try:
             from db.connection import execute_query
             
@@ -280,9 +507,9 @@ def get_address_for_display(stored_address: str, user_id: Union[int, str], pin: 
                     "UPDATE wallets SET address = %s WHERE user_id = %s AND address = %s",
                     (encrypted_address, user_id_hashed, stored_address)
                 )
-                logger.debug(f"Successfully encrypted and updated address for user {hash_user_id(user_id)}")
+                logger.debug(f"Successfully encrypted and updated address for user {user_hash}")
         except Exception as e:
-            logger.error(f"Failed to encrypt address on access for user {hash_user_id(user_id)}: {e}")
+            logger.error(f"Failed to encrypt address on access for user {user_hash}: {e}")
         
         # Return the plain text address for display
         return stored_address
