@@ -93,6 +93,8 @@ from commands.x import (
     x_command, x_conv_handler, cancel_x_command, x_action_callback,
     CHOOSING_X_ACTION, WAITING_FOR_OAUTH
 )
+# Import compliance status command
+from commands.compliance_status import compliance_status_handler
 from services.pin.pin_decorators import PIN_REQUEST, PIN_FAILED, handle_conversation_pin_request
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -279,6 +281,7 @@ def main() -> None:
     application.add_handler(CommandHandler("backup", backup_wrapper))
     application.add_handler(CommandHandler("export_key", export_key_wrapper))
     application.add_handler(CommandHandler("scan", scan_wrapper))
+    application.add_handler(compliance_status_handler)
 
     # Add conversation handler for switching wallets
     wallets_conv_handler = ConversationHandler(

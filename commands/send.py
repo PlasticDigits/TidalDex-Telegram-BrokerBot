@@ -16,6 +16,15 @@ from wallet.send import send_token, send_bnb
 from services.pin.pin_decorators import conversation_pin_helper
 from utils.number_display import number_display_with_sigfig
 from db.utils import hash_user_id
+
+# Import OFAC compliance manager
+try:
+    from services.compliance import ofac_manager
+    OFAC_AVAILABLE = True
+except ImportError:
+    OFAC_AVAILABLE = False
+    ofac_manager = None
+
 # Enable logging
 logger = logging.getLogger(__name__)
 
@@ -413,6 +422,32 @@ async def send_bnb_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             amount_to_convert = amount if amount is not None else Decimal('0')
             amount_wei = int(w3.to_wei(amount_to_convert, 'ether'))
         
+        # OFAC Compliance Check
+        if OFAC_AVAILABLE and ofac_manager:
+            try:
+                compliance_result = await ofac_manager.check_transaction_compliance(
+                    from_address=user_wallet['address'],
+                    to_address=valid_recipient,
+                    user_id=str(user_id_int)
+                )
+                
+                if not compliance_result['is_compliant']:
+                    await response.edit_text(
+                        f"❌ Transaction blocked for compliance reasons:\n"
+                        f"{compliance_result['blocked_reason']}\n\n"
+                        f"This transaction has been logged and will be reported to the authorities."
+                    )
+                    return ConversationHandler.END
+                    
+            except Exception as e:
+                logger.error(f"Compliance check failed for BNB transaction: {str(e)} - BLOCKING transaction for safety")
+                await response.edit_text(
+                    f"❌ Transaction blocked: Compliance check failed.\n\n"
+                    f"Unable to verify transaction compliance. Transaction has been blocked for security reasons.\n"
+                    f"Please try again later or contact support if this issue persists."
+                )
+                return ConversationHandler.END
+        
         # Create a properly typed asynchronous callback wrapper
         callback_wrapper = create_callback_wrapper(status_callback)
         
@@ -603,16 +638,16 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error("User is None in send_token_address")
         return ConversationHandler.END
         
-    user_id: int = update.effective_user.id
+    user_id_int: int = update.effective_user.id
     
     # Get PIN from pin_manager instead of context
-    pin: Optional[str] = pin_manager.get_pin(user_id)
+    pin: Optional[str] = pin_manager.get_pin(user_id_int)
     
     # Get active wallet name
-    wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(str(user_id))
+    wallet_name: Optional[str] = wallet_manager.get_active_wallet_name(str(user_id_int))
     
     # Get user wallet with PIN if required
-    user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(str(user_id), wallet_name, pin)
+    user_wallet: Optional[WalletData] = wallet_manager.get_user_wallet(str(user_id_int), wallet_name, pin)
     
     if not user_wallet:
         await update.message.reply_text("You don't have a wallet yet. Use /wallet to create one.")
@@ -733,6 +768,32 @@ async def send_token_address(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await response.edit_text("❌ Transaction failed: Unable to access wallet private key.")
             return ConversationHandler.END
             
+        # OFAC Compliance Check - BLOCK ALL transactions if compliance check fails
+        if OFAC_AVAILABLE and ofac_manager:
+            try:
+                compliance_result = await ofac_manager.check_transaction_compliance(
+                    from_address=user_wallet['address'],
+                    to_address=valid_recipient,
+                    user_id=str(user_id_int)
+                )
+                
+                if not compliance_result['is_compliant']:
+                    await response.edit_text(
+                        f"❌ Transaction blocked for compliance reasons:\n"
+                        f"{compliance_result['blocked_reason']}\n\n"
+                        f"This transaction cannot be processed due to sanctions compliance requirements."
+                    )
+                    return ConversationHandler.END
+                    
+            except Exception as e:
+                logger.error(f"OFAC compliance check failed for token transaction: {str(e)} - BLOCKING transaction for safety")
+                await response.edit_text(
+                    f"❌ Transaction blocked: Compliance check failed.\n\n"
+                    f"Unable to verify transaction compliance. Transaction has been blocked for security reasons.\n"
+                    f"Please try again later or contact support if this issue persists."
+                )
+                return ConversationHandler.END
+        
         # Create a properly typed callback wrapper
         callback_wrapper = create_callback_wrapper(status_callback)
         

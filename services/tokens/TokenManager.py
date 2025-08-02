@@ -57,6 +57,13 @@ class TokenInfo(TypedDict):
 class TokenManager:
     """Service for managing ERC20 token tracking and balance monitoring."""
     
+    # BLACKLISTED TOKENS - Add deprecated/problematic token addresses here
+    # Format: ["0xTokenAddress1", "0xTokenAddress2", ...]
+    BLACKLISTED_TOKENS = [
+        # Deprecated CL8Y token (security incident at p2b exchange)
+        "0x999311589cc1ed0065ad9ed9702cb593ffc62ddf",
+    ]
+    
     def __init__(self) -> None:
         """Initialize the TokenManager.
         """
@@ -156,7 +163,9 @@ class TokenManager:
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             logger.error(f"Failed to fetch or parse token list from {token_list_url}: {str(e)}")
             
+        logger.info(f"Successfully parsed {len(default_tokens)} tokens from default token list")
         self.default_tokens = default_tokens
+        return default_tokens
 
     async def track(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
         """Track a new ERC20 token for a specific user.
@@ -171,6 +180,11 @@ class TokenManager:
         """
         try:
             token_address = w3.to_checksum_address(token_address)
+            
+            # Check if token is blacklisted
+            if str(token_address).lower() in [addr.lower() for addr in self.BLACKLISTED_TOKENS]:
+                logger.warning(f"Attempted to track blacklisted token {token_address} for user {hash_user_id(user_id)}")
+                return False
             
             if is_token_tracked(user_id, token_address, chain_id):
                 logger.info(f"Token {token_address} is already being tracked for user {hash_user_id(user_id)}")
@@ -257,7 +271,14 @@ class TokenManager:
         # update the default token list
         await self._parse_default_token_list()
         
+        logger.info(f"Starting to scan {len(self.default_tokens)} tokens from default list")
+        
         for token_address in self.default_tokens:
+            # Skip blacklisted tokens
+            if str(token_address).lower() in [addr.lower() for addr in self.BLACKLISTED_TOKENS]:
+                logger.info(f"Skipping blacklisted token {token_address}")
+                continue
+                
             isTokenTracked: bool = is_token_tracked(user_id, str(token_address), chain_id)
             try:
                 if isTokenTracked:
@@ -302,7 +323,8 @@ class TokenManager:
             except Exception as e:
                 logger.error(f"Failed to scan token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
                 continue
-                
+        
+        logger.info(f"Scan completed: processed {len(self.default_tokens)} tokens, newly tracked: {len(newly_tracked)}")
         return newly_tracked
 
     async def balances(self, user_id: str) -> Dict[ChecksumAddress, TokenBalance]:
@@ -500,4 +522,8 @@ class TokenManager:
                 
         except Exception as e:
             logger.error(f"Failed to get token info for {token_address}: {str(e)}")
-            return None 
+            return None
+
+
+# Create singleton instance
+token_manager: TokenManager = TokenManager() 

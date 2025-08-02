@@ -15,7 +15,8 @@ consistency and avoid duplication of logic across the codebase.
 import logging
 import threading
 import traceback
-from typing import Dict, List, Optional, Any, Tuple, Union, TypedDict, cast, Callable
+import asyncio
+from typing import Dict, List, Optional, Any, Tuple, Union, TypedDict, cast, Callable, Awaitable
 from db.wallet import WalletData
 from utils.load_abi import ERC20_ABI
 from mnemonic import Mnemonic
@@ -41,6 +42,14 @@ from utils.web3_connection import w3
 from utils.config import BSC_RPC_URL
 from decimal import Decimal
 from db.utils import hash_user_id
+
+# Import OFAC compliance manager
+try:
+    from services.compliance import ofac_manager
+    OFAC_AVAILABLE = True
+except ImportError:
+    OFAC_AVAILABLE = False
+    ofac_manager = None
 
 logger = logging.getLogger(__name__)
 
@@ -357,10 +366,28 @@ class WalletManager:
             # Derive the wallet from the mnemonic
             wallet_dict: Dict[str, str] = derive_wallet_from_mnemonic(mnemonic, next_index)
             
+            # OFAC Compliance Check
+            wallet_address = wallet_dict.get('address', '')
+            if OFAC_AVAILABLE and ofac_manager:
+                try:
+                    # Run async compliance check in sync context
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    is_compliant = loop.run_until_complete(
+                        ofac_manager.check_wallet_compliance(wallet_address, user_id)
+                    )
+                    loop.close()
+                    
+                    if not is_compliant:
+                        logger.error(f"COMPLIANCE VIOLATION: Cannot create wallet with sanctioned address {wallet_address} for user {hash_user_id(user_id)}")
+                        return None
+                except Exception as e:
+                    logger.error(f"OFAC compliance check failed for wallet creation: {str(e)} - allowing creation")
+            
             # Add the name and derivation path to the wallet data
             new_wallet_data: WalletData = {
                 'name': wallet_name,
-                'address': wallet_dict.get('address', ''),
+                'address': wallet_address,
                 'private_key': wallet_dict.get('private_key', ''),
                 'derivation_path': wallet_derivation_path,
                 'is_active': False,
@@ -432,6 +459,23 @@ class WalletManager:
             if existing_wallet_by_address:
                 logger.error(f"Wallet with address '{address}' already exists for user {hash_user_id(user_id)}")
                 return None
+            
+            # OFAC Compliance Check
+            if OFAC_AVAILABLE and ofac_manager:
+                try:
+                    # Run async compliance check in sync context
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    is_compliant = loop.run_until_complete(
+                        ofac_manager.check_wallet_compliance(address, user_id)
+                    )
+                    loop.close()
+                    
+                    if not is_compliant:
+                        logger.error(f"COMPLIANCE VIOLATION: Cannot import sanctioned wallet address {address} for user {hash_user_id(user_id)}")
+                        return None
+                except Exception as e:
+                    logger.error(f"OFAC compliance check failed for wallet import: {str(e)} - allowing import")
             
             # Create the wallet data
             wallet_data: WalletData = {

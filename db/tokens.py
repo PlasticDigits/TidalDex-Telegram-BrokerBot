@@ -63,10 +63,10 @@ def untrack_token(user_id: str, token_address: str, chain_id: int = 56) -> None:
     user_id = hash_user_id(user_id)
     # Get the token_id
     get_token_id_query = "SELECT id FROM tokens WHERE token_address = %s AND chain_id = %s"
-    token_result = execute_query(get_token_id_query, (token_address, chain_id))
+    token_result = execute_query(get_token_id_query, (token_address, chain_id), fetch='one')
     if not token_result:
         return  # Token not found, nothing to untrack
-    token_id = token_result[0]['id']
+    token_id = token_result['id']
     
     # Remove from user_tracked_tokens
     untrack_query = "DELETE FROM user_tracked_tokens WHERE user_id = %s AND token_id = %s"
@@ -106,11 +106,9 @@ def is_token_tracked(user_id: str, token_address: str, chain_id: int = 56) -> bo
     JOIN tokens t ON t.id = utt.token_id
     WHERE utt.user_id = %s AND t.token_address = %s AND t.chain_id = %s
     """
-    result = execute_query(query, (user_id, token_address, chain_id))
-    if result == -1:
-        return False
-    else:
-        return True
+    result = execute_query(query, (user_id, token_address, chain_id), fetch='one')
+    # Return True if we found a row (result is not None), False otherwise
+    return result is not None
 
 @retry_decorator(5, 0.1)
 def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dict[str, Any]]:
@@ -130,7 +128,7 @@ def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dic
     """
     result = execute_query(query, (token_address, chain_id), fetch='one')
     
-    if not result or result == -1:
+    if not result:
         return None
         
     return {
