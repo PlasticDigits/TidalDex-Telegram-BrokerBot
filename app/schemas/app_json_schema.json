@@ -1,7 +1,7 @@
 {
   "name": "blockchain_app_response",
   "description": "Response schema for blockchain app assistant interactions",
-  "strict": true,
+  "strict": false,
   "schema": {
     "type": "object",
     "properties": {
@@ -41,16 +41,6 @@
       }
     },
     "required": ["response_type", "message"],
-    "additionalProperties": false,
-    "if": {
-      "properties": {
-        "response_type": {
-          "enum": ["view_call", "write_call"]
-        }
-      }
-    },
-    "then": {
-      "required": ["response_type", "message", "contract_call"]
-    }
+    "additionalProperties": false
   }
 }

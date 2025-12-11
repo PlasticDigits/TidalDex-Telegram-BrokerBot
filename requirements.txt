@@ -17,3 +17,6 @@ mypy==1.15.0
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 psycopg2==2.9.10
+# Test dependencies
+pytest==8.4.0
+pytest-asyncio==0.24.0

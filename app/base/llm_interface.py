@@ -5,7 +5,7 @@ Handles conversation context, function calling, and response parsing.
 import logging
 import json
 import os
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 import httpx
 from app.base.app_session import AppSession
 from app.base.app_manager import app_manager
@@ -257,6 +257,21 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             if "message" not in parsed:
                 raise ValueError("Missing message in LLM response")
             
+            # Validate contract_call is present for view_call and write_call
+            response_type = parsed["response_type"]
+            if response_type in ["view_call", "write_call"]:
+                if "contract_call" not in parsed:
+                    raise ValueError(
+                        f"Missing contract_call in LLM response for {response_type}. "
+                        f"contract_call is required when response_type is 'view_call' or 'write_call'."
+                    )
+                # Validate contract_call structure
+                contract_call = parsed["contract_call"]
+                required_fields = ["contract", "method", "parameters", "explanation"]
+                for field in required_fields:
+                    if field not in contract_call:
+                        raise ValueError(f"Missing required field '{field}' in contract_call")
+            
             return parsed
             
         except json.JSONDecodeError as e:
@@ -279,18 +294,45 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
         """Load the JSON schema for OpenAI function calling.
         
         Returns:
-            JSON schema dict
+            JSON schema dict formatted for OpenAI API (with name, strict, and schema fields)
+            OpenAI requires: name, strict, and schema at the json_schema level
         """
         try:
-            schema_path = "app/schemas/app_json_schema.json"
+            # Get absolute path to schema file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            app_dir = os.path.dirname(current_dir)  # Go up from app/base to app/
+            schema_path = os.path.join(app_dir, "schemas", "app_json_schema.json")
             with open(schema_path, 'r') as f:
-                return json.load(f)
+                schema_data = json.load(f)
+            
+            # OpenAI requires name, strict, and schema fields at the json_schema level
+            # The schema file already has the correct structure, so return it as-is
+            if isinstance(schema_data, dict) and "name" in schema_data and "schema" in schema_data:
+                return schema_data
+            
+            # If only inner schema exists, wrap it with required fields
+            if isinstance(schema_data, dict) and "schema" in schema_data:
+                return {
+                    "name": schema_data.get("name", "blockchain_app_response"),
+                    "description": schema_data.get("description", "Response schema for blockchain app assistant"),
+                    "strict": schema_data.get("strict", True),
+                    "schema": schema_data["schema"]
+                }
+            
+            # If it's just the schema object, wrap it
+            return {
+                "name": "blockchain_app_response",
+                "description": "Response schema for blockchain app assistant interactions",
+                "strict": True,
+                "schema": schema_data
+            }
         except Exception as e:
             logger.error(f"Failed to load function schema: {str(e)}")
-            # Return a basic fallback schema
+            # Return a basic fallback schema with proper OpenAI wrapper format
             return {
-                "name": "app_response",
-                "description": "Response from blockchain app assistant",
+                "name": "blockchain_app_response",
+                "description": "Response schema for blockchain app assistant interactions (fallback)",
+                "strict": False,
                 "schema": {
                     "type": "object",
                     "properties": {
@@ -300,9 +342,32 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                         },
                         "message": {"type": "string"}
                     },
-                    "required": ["response_type", "message"]
+                    "required": ["response_type", "message"],
+                    "additionalProperties": False
                 }
             }
 
-# Create singleton instance
-llm_interface = LLMInterface()
+# Singleton instance (lazy initialization)
+_llm_interface_instance: Optional[LLMInterface] = None
+
+def get_llm_interface() -> LLMInterface:
+    """Get or create the singleton LLMInterface instance.
+    
+    Returns:
+        LLMInterface instance
+        
+    Raises:
+        ValueError: If OPENAI_API_KEY is not set
+    """
+    global _llm_interface_instance
+    if _llm_interface_instance is None:
+        _llm_interface_instance = LLMInterface()
+    return _llm_interface_instance
+
+# Backward compatibility: create instance at module level if API key is available
+# This allows existing code to use llm_interface directly, but won't fail if key is missing
+try:
+    llm_interface = LLMInterface()
+except ValueError:
+    # API key not set - will be created lazily when get_llm_interface() is called
+    llm_interface = None  # type: ignore

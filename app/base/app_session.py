@@ -292,6 +292,7 @@ class AppSession:
             # Prepare arguments
             method_config = self.pending_transaction.method_config
             processed_params = self.pending_transaction.processed_params
+            raw_params = self.pending_transaction.raw_params
             args = [processed_params.get(param) for param in method_config["inputs"]]
             value_wei = processed_params.get("value_wei", 0)
             
@@ -303,7 +304,10 @@ class AppSession:
                 method_config["name"],
                 args,
                 value_wei,
-                status_callback
+                status_callback,
+                method_config=method_config,
+                processed_params=processed_params,
+                raw_params=raw_params
             )
             
             self.state = SessionState.COMPLETED
