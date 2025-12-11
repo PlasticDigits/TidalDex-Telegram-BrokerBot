@@ -214,22 +214,16 @@ class LLMAppSession:
             if not method_config:
                 raise ValueError(f"Write method {method_name} not found in LLM app configuration")
             
-            # Process parameters
-            processed_params = await transaction_manager.process_parameters(
-                method_config, parameters, self.llm_app_config
-            )
-            
-            # Set default values
-            if "to" in processed_params and processed_params["to"] == "user_wallet_address":
-                processed_params["to"] = self.wallet_info["address"]
-            
-            # Prepare transaction preview
+            # Prepare transaction preview (this will process parameters internally)
             preview = await transaction_manager.prepare_transaction_preview(
                 method_config,
-                processed_params,
+                parameters,
                 self.llm_app_config,
                 self.wallet_info["address"]
             )
+            
+            # Use processed_params from preview (already has defaults resolved)
+            processed_params = preview["processed_params"]
             
             # Store pending transaction
             self.pending_transaction = PendingTransaction(

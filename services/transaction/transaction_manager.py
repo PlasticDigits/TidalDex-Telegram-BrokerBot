@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import re
+import time
 from typing import Dict, List, Any, Optional, Union
 from web3.exceptions import ContractLogicError
 from wallet.send import send_contract_call
@@ -257,6 +258,7 @@ class TransactionManager:
             if "path" in raw_params:
                 processed["path"] = await self._resolve_token_symbols_in_path(raw_params["path"])
             
+            # Process parameters from raw_params
             for param_name, value in raw_params.items():
                 # Skip path as it's already processed above
                 if param_name == "path":
@@ -283,12 +285,34 @@ class TransactionManager:
                     else:
                         processed[param_name] = value
                 elif param_type == "timestamp" and param_rules.get("default") == "current_time + 5_minutes":
-                    # Generate deadline timestamp (current time + 5 minutes)
-                    import time
-                    processed[param_name] = int(time.time() + 300)
+                    # Only regenerate if value is the default string, otherwise preserve explicit value
+                    if value == "current_time + 5_minutes":
+                        # Generate deadline timestamp (current time + 5 minutes)
+                        processed[param_name] = int(time.time() + 300)
+                    else:
+                        # Preserve explicit timestamp value
+                        processed[param_name] = value
                 else:
                     # No special processing needed
                     processed[param_name] = value
+            
+            # Apply default values for required parameters not in raw_params
+            required_inputs = method_config.get("inputs", [])
+            for param_name in required_inputs:
+                if param_name not in processed:
+                    param_rules = parameter_processing.get(param_name, {})
+                    default_value = param_rules.get("default")
+                    
+                    if default_value:
+                        if default_value == "user_wallet_address":
+                            # This will be resolved later in llm_app_session
+                            processed[param_name] = "user_wallet_address"
+                        elif param_rules.get("type") == "timestamp" and default_value == "current_time + 5_minutes":
+                            # Generate deadline timestamp (current time + 5 minutes)
+                            processed[param_name] = int(time.time() + 300)
+                        else:
+                            # Use the default value as-is
+                            processed[param_name] = default_value
             
             return processed
             
@@ -559,6 +583,11 @@ class TransactionManager:
             
             # Estimate gas
             processed_params = await self.process_parameters(method_config, raw_params, app_config)
+            
+            # Resolve "user_wallet_address" to actual wallet address if needed
+            if "to" in processed_params and processed_params["to"] == "user_wallet_address":
+                processed_params["to"] = wallet_address
+            
             args = [processed_params[param] for param in method_config["inputs"]]
             value_wei = processed_params.get("value_wei", 0)
             
