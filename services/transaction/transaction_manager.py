@@ -253,7 +253,15 @@ class TransactionManager:
             processed = {}
             parameter_processing = app_config.get("parameter_processing", {})
             
+            # First, resolve token symbols in path if present
+            if "path" in raw_params:
+                processed["path"] = await self._resolve_token_symbols_in_path(raw_params["path"])
+            
             for param_name, value in raw_params.items():
+                # Skip path as it's already processed above
+                if param_name == "path":
+                    continue
+                    
                 param_rules = parameter_processing.get(param_name, {})
                 param_type = param_rules.get("type", "string")
                 
@@ -261,7 +269,8 @@ class TransactionManager:
                     # Get token address to determine decimals
                     decimals_from = param_rules.get("get_decimals_from")
                     if decimals_from:
-                        token_address = self._resolve_parameter_reference(decimals_from, raw_params)
+                        # Use processed params (with resolved path) for token address lookup
+                        token_address = self._resolve_parameter_reference(decimals_from, processed)
                         if token_address == "BNB":
                             decimals = 18
                         else:
@@ -287,12 +296,12 @@ class TransactionManager:
             logger.error(f"Parameter processing failed: {str(e)}")
             raise
     
-    def _resolve_parameter_reference(self, param_ref: str, raw_params: Dict[str, Any]) -> str:
+    def _resolve_parameter_reference(self, param_ref: str, params: Dict[str, Any]) -> str:
         """Resolve parameter reference like 'path[0]' to actual value.
         
         Args:
             param_ref: Parameter reference string
-            raw_params: Raw parameters dictionary
+            params: Parameters dictionary (processed or raw)
             
         Returns:
             str: Resolved value
@@ -301,7 +310,7 @@ class TransactionManager:
             if param_ref == "BNB":
                 return "BNB"
             elif param_ref.startswith("path["):
-                path = raw_params.get("path", [])
+                path = params.get("path", [])
                 if not path:
                     return ""
                 
@@ -317,13 +326,83 @@ class TransactionManager:
                         return path[index] if 0 <= index < len(path) else ""
             else:
                 # Direct parameter reference
-                return raw_params.get(param_ref, "")
+                return params.get(param_ref, "")
             
             return ""
             
         except Exception as e:
             logger.error(f"Failed to resolve parameter reference '{param_ref}': {str(e)}")
             return ""
+    
+    async def _resolve_token_symbols_in_path(self, path: List[str]) -> List[str]:
+        """Resolve token symbols to addresses in a swap path.
+        
+        When the LLM returns a path with token symbols like ["CL8Y", "CZUSD"],
+        this method resolves them to their actual contract addresses.
+        
+        Args:
+            path: List of token symbols or addresses
+            
+        Returns:
+            List[str]: Path with all symbols resolved to checksum addresses
+        """
+        resolved_path: List[str] = []
+        
+        for token_ref in path:
+            # Check if it's already a valid address
+            if self.web3.is_address(token_ref):
+                resolved_path.append(self.web3.to_checksum_address(token_ref))
+            elif token_ref in ["BNB", "ETH"]:
+                # Native token - keep as is, will be handled by swap manager
+                resolved_path.append(token_ref)
+            else:
+                # Try to resolve as symbol
+                token_address = await self._resolve_token_symbol(token_ref)
+                if token_address:
+                    resolved_path.append(token_address)
+                else:
+                    # If can't resolve, raise an error with a helpful message
+                    raise ValueError(
+                        f"Could not resolve token symbol '{token_ref}' to an address. "
+                        f"Please ensure the token is in the default token list or use the token address instead."
+                    )
+        
+        return resolved_path
+    
+    async def _resolve_token_symbol(self, symbol: str) -> Optional[str]:
+        """Resolve a token symbol to its contract address.
+        
+        Args:
+            symbol: Token symbol to resolve (e.g., "CL8Y", "CZUSD")
+            
+        Returns:
+            Optional[str]: Token checksum address if found, None otherwise
+        """
+        try:
+            from utils.token import find_token
+            from services.tokens import token_manager
+            
+            # First try to find in default token list
+            token_info = await find_token(symbol=symbol)
+            if token_info and token_info.get('address'):
+                return self.web3.to_checksum_address(token_info['address'])
+            
+            # If not found, check if TokenManager has parsed the default token list
+            # and search by symbol there
+            if not token_manager.default_tokens:
+                await token_manager._parse_default_token_list()
+            
+            # Search in default_tokens by symbol (case-insensitive)
+            for address, details in token_manager.default_tokens.items():
+                if details['symbol'].upper() == symbol.upper():
+                    return str(address)
+            
+            logger.warning(f"Token symbol '{symbol}' not found in default token list")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to resolve token symbol '{symbol}': {str(e)}")
+            return None
     
     async def _ensure_token_approval(
         self,
