@@ -22,9 +22,26 @@ class LLMInterface:
             raise ValueError("OPENAI_API_KEY environment variable not set")
         
         self.base_url = "https://api.openai.com/v1"
-        self.model = "gpt-5-nano"  # Cheapest model: $0.05/$0.40 per 1M tokens (input/output)
+        # Default to gpt-5-nano (cheapest: $0.10/$0.40 per 1M tokens)
+        # Requires max_completion_tokens instead of max_tokens
+        self.model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
         self.max_tokens = 1000
         
+        # Newer models (gpt-5-*, o1-*, o3-*) use max_completion_tokens instead of max_tokens
+        self._uses_new_token_param = self._check_new_model_format(self.model)
+        
+    def _check_new_model_format(self, model: str) -> bool:
+        """Check if model uses new API parameters (max_completion_tokens vs max_tokens).
+        
+        Args:
+            model: Model name string
+            
+        Returns:
+            True if model uses new parameter format (gpt-5-*, o1-*, o3-*)
+        """
+        new_model_prefixes = ("gpt-5", "o1-", "o3-")
+        return any(model.startswith(prefix) for prefix in new_model_prefixes)
+    
     async def process_user_message(
         self,
         session: LLMAppSession,
@@ -66,6 +83,48 @@ class LLMInterface:
             
             return parsed_response
             
+        except httpx.HTTPStatusError as e:
+            error_msg = str(e)
+            logger.error(f"Failed to process user message (HTTP error): {error_msg}")
+            
+            # Provide more specific error messages
+            if "400" in error_msg or "404" in error_msg:
+                user_message = (
+                    "I'm having trouble connecting to the AI service. "
+                    "This might be a configuration issue. Please try again later."
+                )
+            elif "401" in error_msg:
+                user_message = (
+                    "There's an authentication issue with the AI service. "
+                    "Please contact support."
+                )
+            elif "429" in error_msg:
+                user_message = (
+                    "The AI service is currently busy. "
+                    "Please wait a moment and try again."
+                )
+            else:
+                user_message = "I encountered an error processing your request. Please try again."
+            
+            return {
+                "response_type": "chat",
+                "message": user_message,
+                "error": error_msg
+            }
+        except httpx.ConnectError as e:
+            logger.error(f"Failed to connect to OpenAI API: {str(e)}")
+            return {
+                "response_type": "chat",
+                "message": "Unable to connect to the AI service. Please check your internet connection.",
+                "error": str(e)
+            }
+        except httpx.TimeoutException as e:
+            logger.error(f"OpenAI API request timed out: {str(e)}")
+            return {
+                "response_type": "chat",
+                "message": "The AI service is taking too long to respond. Please try again.",
+                "error": str(e)
+            }
         except Exception as e:
             logger.error(f"Failed to process user message: {str(e)}")
             return {
@@ -214,16 +273,22 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             "Content-Type": "application/json"
         }
         
-        payload = {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
-            "temperature": 0.1,  # Lower temperature for more consistent responses
             "response_format": {
                 "type": "json_schema",
                 "json_schema": function_schema
             }
         }
+        
+        # Use appropriate token parameter based on model type
+        if self._uses_new_token_param:
+            payload["max_completion_tokens"] = self.max_tokens
+            # Note: temperature may not be supported for all reasoning models
+        else:
+            payload["max_tokens"] = self.max_tokens
+            payload["temperature"] = 0.1  # Lower temperature for more consistent responses
         
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
@@ -231,7 +296,13 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                 headers=headers,
                 json=payload
             )
-            response.raise_for_status()
+            
+            # Check for errors before raising
+            if response.status_code >= 400:
+                error_detail = self._parse_api_error(response)
+                logger.error(f"OpenAI API error ({response.status_code}): {error_detail}")
+                response.raise_for_status()
+            
             return response.json()
     
     def _parse_openai_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
@@ -290,6 +361,42 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                 "error": str(e)
             }
     
+    def _parse_api_error(self, response: httpx.Response) -> str:
+        """Parse and format OpenAI API error response.
+        
+        Args:
+            response: httpx Response object with error
+            
+        Returns:
+            Human-readable error message
+        """
+        try:
+            error_json = response.json()
+            if "error" in error_json:
+                error = error_json["error"]
+                error_type = error.get("type", "unknown")
+                error_code = error.get("code", "unknown")
+                error_message = error.get("message", "Unknown error")
+                
+                # Provide specific guidance for common errors
+                if error_code == "model_not_found":
+                    return (
+                        f"Model '{self.model}' not found. "
+                        f"Try setting OPENAI_MODEL env var to 'gpt-4o-mini' or 'gpt-3.5-turbo'. "
+                        f"Original error: {error_message}"
+                    )
+                elif error_code == "invalid_api_key":
+                    return "Invalid API key. Check your OPENAI_API_KEY environment variable."
+                elif error_type == "invalid_request_error":
+                    return f"Invalid request: {error_message}"
+                elif error_type == "rate_limit_error":
+                    return f"Rate limit exceeded. Please try again later. {error_message}"
+                else:
+                    return f"{error_type} ({error_code}): {error_message}"
+            return str(error_json)
+        except Exception:
+            return f"HTTP {response.status_code}: {response.text[:200]}"
+
     def _load_function_schema(self) -> Dict[str, Any]:
         """Load the JSON schema for OpenAI function calling.
         
