@@ -1,6 +1,6 @@
 {
-  "name": "blockchain_app_response",
-  "description": "Response schema for blockchain app assistant interactions",
+  "name": "blockchain_llm_app_response",
+  "description": "Response schema for blockchain LLM app assistant interactions",
   "strict": false,
   "schema": {
     "type": "object",
@@ -20,7 +20,7 @@
         "properties": {
           "contract": {
             "type": "string",
-            "description": "Name of the contract to call (must match app config)"
+            "description": "Name of the contract to call (must match LLM app config)"
           },
           "method": {
             "type": "string",

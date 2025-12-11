@@ -7,8 +7,8 @@ import json
 import os
 from typing import Dict, List, Any, Optional
 import httpx
-from app.base.app_session import AppSession
-from app.base.app_manager import app_manager
+from app.base.llm_app_session import LLMAppSession
+from app.base.llm_app_manager import llm_app_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,13 @@ class LLMInterface:
         
     async def process_user_message(
         self,
-        session: AppSession,
+        session: LLMAppSession,
         user_message: str
     ) -> Dict[str, Any]:
         """Process a user message and return the assistant's response.
         
         Args:
-            session: Active app session
+            session: Active LLM app session
             user_message: User's input message
             
         Returns:
@@ -74,30 +74,30 @@ class LLMInterface:
                 "error": str(e)
             }
     
-    async def _build_system_prompt(self, session: AppSession) -> str:
+    async def _build_system_prompt(self, session: LLMAppSession) -> str:
         """Build the system prompt for the LLM.
         
         Args:
-            session: Active app session
+            session: Active LLM app session
             
         Returns:
             Complete system prompt string
         """
-        app_config = session.app_config
+        llm_app_config = session.llm_app_config
         context = session.context
         
         # Load style guide
-        style_guide = app_manager.load_app_style_guide(session.app_name)
+        style_guide = llm_app_manager.load_llm_app_style_guide(session.llm_app_name)
         style_section = f"\n\n## Style Guide\n{style_guide}" if style_guide else ""
         
         # Format available methods
         view_methods = []
         write_methods = []
         
-        for method in app_config["available_methods"].get("view", []):
+        for method in llm_app_config["available_methods"].get("view", []):
             view_methods.append(f"- **{method['name']}**: {method['description']}")
         
-        for method in app_config["available_methods"].get("write", []):
+        for method in llm_app_config["available_methods"].get("write", []):
             write_methods.append(f"- **{method['name']}**: {method['description']}")
         
         # Format user's token balances
@@ -108,11 +108,11 @@ class LLMInterface:
                 balance_lines.append(f"- {token['balance']} {token['symbol']} ({token['name']})")
             balance_info = f"\n\n**Your Token Balances:**\n" + "\n".join(balance_lines)
         
-        system_prompt = f"""You are an expert assistant for the {app_config['name']} app on TidalDex.
+        system_prompt = f"""You are an expert assistant for the {llm_app_config['name']} LLM app on TidalDex.
 
-## App Information
-**Name:** {app_config['name']}
-**Description:** {app_config['description']}
+## LLM App Information
+**Name:** {llm_app_config['name']}
+**Description:** {llm_app_config['description']}
 
 ## User Context
 **Wallet Address:** {context.get('wallet_address', 'Not available')}
@@ -313,16 +313,16 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             # If only inner schema exists, wrap it with required fields
             if isinstance(schema_data, dict) and "schema" in schema_data:
                 return {
-                    "name": schema_data.get("name", "blockchain_app_response"),
-                    "description": schema_data.get("description", "Response schema for blockchain app assistant"),
+                    "name": schema_data.get("name", "blockchain_llm_app_response"),
+                    "description": schema_data.get("description", "Response schema for blockchain LLM app assistant"),
                     "strict": schema_data.get("strict", True),
                     "schema": schema_data["schema"]
                 }
             
             # If it's just the schema object, wrap it
             return {
-                "name": "blockchain_app_response",
-                "description": "Response schema for blockchain app assistant interactions",
+                "name": "blockchain_llm_app_response",
+                "description": "Response schema for blockchain LLM app assistant interactions",
                 "strict": True,
                 "schema": schema_data
             }
@@ -330,8 +330,8 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             logger.error(f"Failed to load function schema: {str(e)}")
             # Return a basic fallback schema with proper OpenAI wrapper format
             return {
-                "name": "blockchain_app_response",
-                "description": "Response schema for blockchain app assistant interactions (fallback)",
+                "name": "blockchain_llm_app_response",
+                "description": "Response schema for blockchain LLM app assistant interactions (fallback)",
                 "strict": False,
                 "schema": {
                     "type": "object",

@@ -62,7 +62,7 @@ class TestLLMEdgeCases:
             assert "name" in schema
             assert "strict" in schema
             assert "schema" in schema
-            assert schema["name"] == "blockchain_app_response"
+            assert schema["name"] == "blockchain_llm_app_response"
     
     def test_load_schema_fallback_format(self):
         """Test that fallback schema has correct OpenAI wrapper format."""

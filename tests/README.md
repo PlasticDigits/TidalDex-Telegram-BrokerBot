@@ -38,7 +38,7 @@ These tests run without database, wallet, or external API access:
 | File | Tests | Description |
 |------|-------|-------------|
 | `test_llm_response_parsing.py` | 12 | LLM response parsing and validation |
-| `test_app_manager_validation.py` | 20 | App configuration validation |
+| `test_app_manager_validation.py` | 20 | LLM app configuration validation |
 | `test_llm_edge_cases.py` | 27 | Edge cases for LLM interface |
 | `test_llm_system_prompt.py` | 12 | System prompt building |
 
@@ -65,7 +65,7 @@ These tests run without database, wallet, or external API access:
 - ✅ Invalid JSON handling
 - ✅ Swap-specific response formats
 
-### App Manager Validation (`test_app_manager_validation.py`)
+### LLM App Manager Validation (`test_app_manager_validation.py`)
 
 - ✅ Missing ABI file detection
 - ✅ Missing method name/inputs validation

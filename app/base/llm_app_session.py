@@ -1,5 +1,5 @@
 """
-App session management for tracking conversation state and handling transactions.
+LLM app session management for tracking conversation state and handling transactions.
 """
 import logging
 import json
@@ -18,7 +18,7 @@ from db.utils import hash_user_id
 logger = logging.getLogger(__name__)
 
 class SessionState(Enum):
-    """Possible states of an app session."""
+    """Possible states of an LLM app session."""
     ACTIVE = "active"
     AWAITING_CONFIRMATION = "awaiting_confirmation"
     AWAITING_PIN = "awaiting_pin"
@@ -34,20 +34,20 @@ class PendingTransaction:
     preview: Dict[str, Any]
     raw_params: Dict[str, Any] = field(default_factory=dict)
 
-class AppSession:
-    """Manages the state and execution of an app conversation session."""
+class LLMAppSession:
+    """Manages the state and execution of an LLM app conversation session."""
     
-    def __init__(self, user_id: str, app_name: str, app_config: Dict[str, Any]):
-        """Initialize an app session.
+    def __init__(self, user_id: str, llm_app_name: str, llm_app_config: Dict[str, Any]):
+        """Initialize an LLM app session.
         
         Args:
             user_id: Telegram user ID as string
-            app_name: Name of the app being used
-            app_config: Full app configuration
+            llm_app_name: Name of the LLM app being used
+            llm_app_config: Full LLM app configuration
         """
         self.user_id = user_id
-        self.app_name = app_name
-        self.app_config = app_config
+        self.llm_app_name = llm_app_name
+        self.llm_app_config = llm_app_config
         self.state = SessionState.ACTIVE
         self.conversation_history: List[Dict[str, str]] = []
         self.context: Dict[str, Any] = {}
@@ -90,7 +90,7 @@ class AppSession:
             # Build context for LLM
             self.context = await self._build_llm_context()
             
-            logger.info(f"Initialized context for user {hash_user_id(self.user_id)} in app {self.app_name}")
+            logger.info(f"Initialized context for user {hash_user_id(self.user_id)} in LLM app {self.llm_app_name}")
             return True
             
         except Exception as e:
@@ -116,12 +116,12 @@ class AppSession:
             })
         
         return {
-            "app_name": self.app_name,
-            "app_description": self.app_config["description"],
+            "app_name": self.llm_app_name,
+            "app_description": self.llm_app_config["description"],
             "wallet_address": wallet_address,
             "tracked_tokens": self.tracked_tokens,
             "token_balances": balance_info,
-            "available_methods": self.app_config["available_methods"]
+            "available_methods": self.llm_app_config["available_methods"]
         }
     
     def add_message(self, role: str, content: str) -> None:
@@ -156,23 +156,23 @@ class AppSession:
             # Find method config
             method_config = self._find_method_config(method_name, "view")
             if not method_config:
-                raise ValueError(f"View method {method_name} not found in app configuration")
+                raise ValueError(f"View method {method_name} not found in LLM app configuration")
             
             # Get contract info
-            contract_name = method_config.get("contract", list(self.app_config["contracts"].keys())[0])
-            contract_config = self.app_config["contracts"][contract_name]
+            contract_name = method_config.get("contract", list(self.llm_app_config["contracts"].keys())[0])
+            contract_config = self.llm_app_config["contracts"][contract_name]
             contract_address = os.getenv(contract_config["address_env_var"])
             
             if not contract_address:
                 raise ValueError(f"Contract address not found: {contract_config['address_env_var']}")
             
             # Load ABI
-            abi_path = f"app/apps/{self.app_name}/{contract_config['abi_file']}"
+            abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
             abi = self._load_abi(abi_path)
             
             # Process parameters
             processed_params = await transaction_manager.process_parameters(
-                method_config, parameters, self.app_config
+                method_config, parameters, self.llm_app_config
             )
             
             # Prepare arguments in correct order
@@ -212,11 +212,11 @@ class AppSession:
             # Find method config
             method_config = self._find_method_config(method_name, "write")
             if not method_config:
-                raise ValueError(f"Write method {method_name} not found in app configuration")
+                raise ValueError(f"Write method {method_name} not found in LLM app configuration")
             
             # Process parameters
             processed_params = await transaction_manager.process_parameters(
-                method_config, parameters, self.app_config
+                method_config, parameters, self.llm_app_config
             )
             
             # Set default values
@@ -227,7 +227,7 @@ class AppSession:
             preview = await transaction_manager.prepare_transaction_preview(
                 method_config,
                 processed_params,
-                self.app_config,
+                self.llm_app_config,
                 self.wallet_info["address"]
             )
             
@@ -235,7 +235,7 @@ class AppSession:
             self.pending_transaction = PendingTransaction(
                 method_config=method_config,
                 processed_params=processed_params,
-                app_config=self.app_config,
+                app_config=self.llm_app_config,
                 preview=preview,
                 raw_params=parameters
             )
@@ -280,13 +280,13 @@ class AppSession:
             # Get contract info
             contract_name = self.pending_transaction.method_config.get(
                 "contract", 
-                list(self.app_config["contracts"].keys())[0]
+                list(self.llm_app_config["contracts"].keys())[0]
             )
-            contract_config = self.app_config["contracts"][contract_name]
+            contract_config = self.llm_app_config["contracts"][contract_name]
             contract_address = os.getenv(contract_config["address_env_var"])
             
             # Load ABI
-            abi_path = f"app/apps/{self.app_name}/{contract_config['abi_file']}"
+            abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
             abi = self._load_abi(abi_path)
             
             # Prepare arguments
@@ -337,7 +337,7 @@ class AppSession:
         Returns:
             Method configuration dict or None if not found
         """
-        methods = self.app_config["available_methods"].get(method_type, [])
+        methods = self.llm_app_config["available_methods"].get(method_type, [])
         for method in methods:
             if method["name"] == method_name:
                 return method
@@ -387,7 +387,7 @@ class AppSession:
         """
         return InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Confirm Transaction", callback_data=f"app_confirm_{self.app_name}"),
-                InlineKeyboardButton("❌ Cancel", callback_data=f"app_cancel_{self.app_name}")
+                InlineKeyboardButton("✅ Confirm Transaction", callback_data=f"llm_app_confirm_{self.llm_app_name}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"llm_app_cancel_{self.llm_app_name}")
             ]
         ])

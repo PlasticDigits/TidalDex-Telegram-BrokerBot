@@ -21,7 +21,7 @@ except ImportError:
     HAS_PYTEST = False
 
 from app.base.llm_interface import LLMInterface
-from app.base.app_session import AppSession
+from app.base.llm_app_session import LLMAppSession
 
 
 @pytest.mark.unit
@@ -46,14 +46,14 @@ class TestLLMSystemPrompt:
     
     def _create_mock_session(
         self,
-        app_config: Dict[str, Any],
+        llm_app_config: Dict[str, Any],
         context: Dict[str, Any] = None,
-        app_name: str = "test_app"
-    ) -> AppSession:
-        """Create a mock AppSession for testing."""
-        session = Mock(spec=AppSession)
-        session.app_config = app_config
-        session.app_name = app_name
+        llm_app_name: str = "test_app"
+    ) -> LLMAppSession:
+        """Create a mock LLMAppSession for testing."""
+        session = Mock(spec=LLMAppSession)
+        session.llm_app_config = llm_app_config
+        session.llm_app_name = llm_app_name
         session.context = context or {}
         session.conversation_history = []
         return session
@@ -75,9 +75,9 @@ class TestLLMSystemPrompt:
         }
         session = self._create_mock_session(app_config, context)
         
-        # Mock app_manager
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        # Mock llm_app_manager
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "swap" in prompt
@@ -100,8 +100,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "None" in prompt or "View Methods" in prompt
@@ -121,8 +121,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "readData" in prompt
@@ -144,8 +144,8 @@ class TestLLMSystemPrompt:
         
         style_guide = "## Style Guide\nBe friendly and professional."
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=style_guide):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=style_guide):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "Style Guide" in prompt
@@ -165,8 +165,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             # Should not have style guide section
@@ -192,8 +192,8 @@ class TestLLMSystemPrompt:
         }
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "Your Token Balances" in prompt
@@ -221,8 +221,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "method1" in prompt
@@ -246,8 +246,8 @@ class TestLLMSystemPrompt:
         context = {}  # No wallet_address
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "Not available" in prompt or "wallet_address" in prompt.lower()
@@ -272,8 +272,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "getBalance" in prompt
@@ -295,8 +295,8 @@ class TestLLMSystemPrompt:
         context = {"wallet_address": "0x123"}
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert '<special>' in prompt or 'special' in prompt
@@ -322,8 +322,8 @@ class TestLLMSystemPrompt:
         }
         session = self._create_mock_session(app_config, context)
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=None):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=None):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "Your Token Balances" in prompt
@@ -347,8 +347,8 @@ class TestLLMSystemPrompt:
         
         long_style_guide = "# Style Guide\n" + "Be professional and helpful.\n" * 100
         
-        from app.base import app_manager as real_app_manager
-        with patch.object(real_app_manager, 'load_app_style_guide', return_value=long_style_guide):
+        from app.base import llm_app_manager as real_llm_app_manager
+        with patch.object(real_llm_app_manager, 'load_llm_app_style_guide', return_value=long_style_guide):
             prompt = await self.llm._build_system_prompt(session)
             
             assert "Style Guide" in prompt

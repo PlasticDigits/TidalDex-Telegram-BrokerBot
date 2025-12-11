@@ -1,21 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "App Configuration Schema",
-  "description": "Schema for declarative blockchain app configurations",
+  "title": "LLM App Configuration Schema",
+  "description": "Schema for declarative LLM-powered blockchain app configurations",
   "type": "object",
   "required": ["name", "description", "contracts", "available_methods"],
   "properties": {
     "name": {
       "type": "string",
-      "description": "Unique identifier for the app"
+      "description": "Unique identifier for the LLM app"
     },
     "description": {
       "type": "string",
-      "description": "Human-readable description of what this app does"
+      "description": "Human-readable description of what this LLM app does"
     },
     "contracts": {
       "type": "object",
-      "description": "Contract addresses and ABIs used by this app",
+      "description": "Contract addresses and ABIs used by this LLM app",
       "patternProperties": {
         "^[a-zA-Z_][a-zA-Z0-9_]*$": {
           "type": "object",
@@ -27,7 +27,7 @@
             },
             "abi_file": {
               "type": "string",
-              "description": "Filename of the ABI JSON file (relative to app directory)"
+              "description": "Filename of the ABI JSON file (relative to LLM app directory)"
             }
           }
         }

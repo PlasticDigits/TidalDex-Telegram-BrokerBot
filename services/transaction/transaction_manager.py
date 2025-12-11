@@ -554,7 +554,7 @@ class TransactionManager:
                 raise ValueError(f"Contract address not found in environment: {contract_config['address_env_var']}")
             
             # Load ABI
-            abi_path = f"app/apps/{app_config['name']}/{contract_config['abi_file']}"
+            abi_path = f"app/llm_apps/{app_config['name']}/{contract_config['abi_file']}"
             abi = load_abi_from_file(abi_path)
             
             # Estimate gas

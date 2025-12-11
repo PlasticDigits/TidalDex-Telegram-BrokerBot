@@ -1,6 +1,6 @@
 """
-Blockchain app system for conversational DeFi interactions.
+Blockchain LLM app system for conversational DeFi interactions.
 """
-from .base import app_manager, llm_interface
+from .base import llm_app_manager, llm_interface
 
-__all__ = ['app_manager', 'llm_interface']
+__all__ = ['llm_app_manager', 'llm_interface']

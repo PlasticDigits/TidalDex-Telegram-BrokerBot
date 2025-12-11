@@ -83,8 +83,8 @@ from commands.swap import (
     CHOOSING_FROM_TOKEN, CHOOSING_TO_TOKEN, ENTERING_AMOUNT, ENTERING_SLIPPAGE, CONFIRMING_SWAP,
     swap_command
 )
-# Import app command for conversational blockchain interactions
-from commands.app import (
+# Import LLM app command for conversational blockchain interactions
+from commands.llm_app import (
     app_command, handle_app_choice, handle_conversation, handle_transaction_confirmation,
     cancel_app_conversation, CHOOSING_APP, CONVERSING, CONFIRMING_TRANSACTION
 )
@@ -424,9 +424,9 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     
-    # Add conversation handler for blockchain apps
+    # Add conversation handler for blockchain LLM apps
     app_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("app", app_wrapper)],
+        entry_points=[CommandHandler("llm_app", app_wrapper)],
         states={
             PIN_REQUEST: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
@@ -435,13 +435,13 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation_pin_request)
             ],
             CHOOSING_APP: [
-                CallbackQueryHandler(handle_app_choice, pattern=r'^app_(start_.*|cancel)$')
+                CallbackQueryHandler(handle_app_choice, pattern=r'^llm_app_(start_.*|cancel)$')
             ],
             CONVERSING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_conversation)
             ],
             CONFIRMING_TRANSACTION: [
-                CallbackQueryHandler(handle_transaction_confirmation, pattern=r'^app_(confirm_.*|cancel_.*)$')
+                CallbackQueryHandler(handle_transaction_confirmation, pattern=r'^llm_app_(confirm_.*|cancel_.*)$')
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_app_conversation)]

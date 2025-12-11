@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Tests for AppManager validation logic.
+Tests for LLMAppManager validation logic.
 
-Tests app configuration validation without requiring database access.
+Tests LLM app configuration validation without requiring database access.
 """
 import json
 import sys
@@ -20,16 +20,16 @@ try:
 except ImportError:
     HAS_PYTEST = False
 
-from app.base.app_manager import AppManager
+from app.base.llm_app_manager import LLMAppManager
 
 
 @pytest.mark.unit
-class TestAppManagerValidation:
-    """Tests for AppManager validation without requiring database."""
+class TestLLMAppManagerValidation:
+    """Tests for LLMAppManager validation without requiring database."""
     
     def setup_method(self):
         """Set up test fixtures."""
-        self.manager = AppManager()
+        self.manager = LLMAppManager()
     
     def _create_temp_app_dir(self, app_name: str, config: dict) -> Path:
         """Create a temporary app directory with config."""
@@ -61,12 +61,12 @@ class TestAppManagerValidation:
         }
         
         app_dir = self._create_temp_app_dir("test_app", config)
-        self.manager.loaded_apps["test_app"] = {
+        self.manager.loaded_llm_apps["test_app"] = {
             **config,
             "app_path": str(app_dir)
         }
         
-        errors = self.manager.validate_app_config("test_app")
+        errors = self.manager.validate_llm_app_config("test_app")
         assert len(errors) > 0
         assert any("ABI file not found" in error for error in errors)
         
@@ -88,8 +88,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["test_app"] = config
-        errors = self.manager.validate_app_config("test_app")
+        self.manager.loaded_llm_apps["test_app"] = config
+        errors = self.manager.validate_llm_app_config("test_app")
         assert len(errors) > 0
         assert any("missing 'name' field" in error.lower() for error in errors)
     
@@ -107,8 +107,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["test_app"] = config
-        errors = self.manager.validate_app_config("test_app")
+        self.manager.loaded_llm_apps["test_app"] = config
+        errors = self.manager.validate_llm_app_config("test_app")
         assert len(errors) > 0
         assert any("missing 'inputs' field" in error.lower() for error in errors)
     
@@ -136,13 +136,13 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["valid_app"] = config
-        errors = self.manager.validate_app_config("valid_app")
+        self.manager.loaded_llm_apps["valid_app"] = config
+        errors = self.manager.validate_llm_app_config("valid_app")
         assert len(errors) == 0
     
     def test_validate_app_config_nonexistent_app(self):
-        """Test validation returns error for nonexistent app."""
-        errors = self.manager.validate_app_config("nonexistent_app")
+        """Test validation returns error for nonexistent LLM app."""
+        errors = self.manager.validate_llm_app_config("nonexistent_app")
         assert len(errors) > 0
         assert any("not found" in error.lower() for error in errors)
     
@@ -169,7 +169,7 @@ class TestAppManagerValidation:
         with open(abi_file, 'w') as f:
             json.dump([], f)
         
-        self.manager.loaded_apps["env_test"] = {
+        self.manager.loaded_llm_apps["env_test"] = {
             **config,
             "app_path": str(app_dir)
         }
@@ -178,7 +178,7 @@ class TestAppManagerValidation:
         if "MISSING_ENV_VAR" in os.environ:
             del os.environ["MISSING_ENV_VAR"]
         
-        errors = self.manager.validate_app_config("env_test")
+        errors = self.manager.validate_llm_app_config("env_test")
         # Should have error about missing env var
         assert any("MISSING_ENV_VAR" in error for error in errors)
         
@@ -193,8 +193,8 @@ class TestAppManagerValidation:
             "app_path": "/nonexistent/path"
         }
         
-        self.manager.loaded_apps["no_style"] = config
-        style_guide = self.manager.load_app_style_guide("no_style")
+        self.manager.loaded_llm_apps["no_style"] = config
+        style_guide = self.manager.load_llm_app_style_guide("no_style")
         assert style_guide is None
     
     def test_load_app_style_guide_existing_file(self):
@@ -209,12 +209,12 @@ class TestAppManagerValidation:
         with open(style_file, 'w') as f:
             f.write(style_content)
         
-        self.manager.loaded_apps["with_style"] = {
+        self.manager.loaded_llm_apps["with_style"] = {
             "name": "with_style",
             "app_path": str(app_dir)
         }
         
-        loaded_content = self.manager.load_app_style_guide("with_style")
+        loaded_content = self.manager.load_llm_app_style_guide("with_style")
         assert loaded_content == style_content
         
         # Cleanup
@@ -222,30 +222,30 @@ class TestAppManagerValidation:
         shutil.rmtree(app_dir.parent)
     
     def test_load_app_style_guide_nonexistent_app(self):
-        """Test style guide loading for nonexistent app."""
-        style_guide = self.manager.load_app_style_guide("nonexistent")
+        """Test style guide loading for nonexistent LLM app."""
+        style_guide = self.manager.load_llm_app_style_guide("nonexistent")
         assert style_guide is None
     
     def test_get_app_config_existing(self):
-        """Test getting config for existing app."""
+        """Test getting config for existing LLM app."""
         config = {"name": "test", "description": "Test"}
-        self.manager.loaded_apps["test"] = config
-        retrieved = self.manager.get_app_config("test")
+        self.manager.loaded_llm_apps["test"] = config
+        retrieved = self.manager.get_llm_app_config("test")
         assert retrieved == config
     
     def test_get_app_config_nonexistent(self):
-        """Test getting config for nonexistent app."""
-        retrieved = self.manager.get_app_config("nonexistent")
+        """Test getting config for nonexistent LLM app."""
+        retrieved = self.manager.get_llm_app_config("nonexistent")
         assert retrieved is None
     
     def test_get_available_apps(self):
-        """Test getting list of available apps."""
-        self.manager.loaded_apps = {
+        """Test getting list of available LLM apps."""
+        self.manager.loaded_llm_apps = {
             "app1": {"name": "app1", "description": "First app"},
             "app2": {"name": "app2", "description": "Second app"}
         }
         
-        apps = self.manager.get_available_apps()
+        apps = self.manager.get_available_llm_apps()
         assert len(apps) == 2
         assert {"name": "app1", "description": "First app"} in apps
         assert {"name": "app2", "description": "Second app"} in apps
@@ -264,8 +264,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["no_contracts"] = config
-        errors = self.manager.validate_app_config("no_contracts")
+        self.manager.loaded_llm_apps["no_contracts"] = config
+        errors = self.manager.validate_llm_app_config("no_contracts")
         # Empty contracts is valid - app might just be a UI app
         assert len(errors) == 0
     
@@ -283,8 +283,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["missing_desc"] = config
-        errors = self.manager.validate_app_config("missing_desc")
+        self.manager.loaded_llm_apps["missing_desc"] = config
+        errors = self.manager.validate_llm_app_config("missing_desc")
         # Missing description might not be a validation error (depends on implementation)
         # Just verify it doesn't crash
         assert isinstance(errors, list)
@@ -303,8 +303,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["empty_name"] = config
-        errors = self.manager.validate_app_config("empty_name")
+        self.manager.loaded_llm_apps["empty_name"] = config
+        errors = self.manager.validate_llm_app_config("empty_name")
         # Empty name should technically be valid (it has a name field)
         assert isinstance(errors, list)
     
@@ -323,8 +323,8 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["special_chars"] = config
-        errors = self.manager.validate_app_config("special_chars")
+        self.manager.loaded_llm_apps["special_chars"] = config
+        errors = self.manager.validate_llm_app_config("special_chars")
         # Special chars are allowed in method names
         assert len(errors) == 0
     
@@ -346,15 +346,15 @@ class TestAppManagerValidation:
             }
         }
         
-        self.manager.loaded_apps["dict_inputs"] = config
-        errors = self.manager.validate_app_config("dict_inputs")
+        self.manager.loaded_llm_apps["dict_inputs"] = config
+        errors = self.manager.validate_llm_app_config("dict_inputs")
         # Dict inputs might be valid depending on implementation
         assert isinstance(errors, list)
     
     def test_get_available_apps_empty(self):
-        """Test getting available apps when none are loaded."""
-        self.manager.loaded_apps = {}
-        apps = self.manager.get_available_apps()
+        """Test getting available LLM apps when none are loaded."""
+        self.manager.loaded_llm_apps = {}
+        apps = self.manager.get_available_llm_apps()
         assert apps == []
     
     def test_load_app_style_guide_empty_content(self):
@@ -368,12 +368,12 @@ class TestAppManagerValidation:
         with open(style_file, 'w') as f:
             f.write("")  # Empty file
         
-        self.manager.loaded_apps["empty_style"] = {
+        self.manager.loaded_llm_apps["empty_style"] = {
             "name": "empty_style",
             "app_path": str(app_dir)
         }
         
-        loaded_content = self.manager.load_app_style_guide("empty_style")
+        loaded_content = self.manager.load_llm_app_style_guide("empty_style")
         assert loaded_content == ""
         
         # Cleanup
@@ -417,8 +417,8 @@ class TestAppManagerValidation:
             "app_path": str(app_dir)
         }
         
-        self.manager.loaded_apps["multi_contract"] = config
-        errors = self.manager.validate_app_config("multi_contract")
+        self.manager.loaded_llm_apps["multi_contract"] = config
+        errors = self.manager.validate_llm_app_config("multi_contract")
         
         # Should have errors for missing env vars
         assert any("ROUTER_ADDRESS" in error for error in errors)
@@ -430,7 +430,7 @@ class TestAppManagerValidation:
 
 
 if __name__ == "__main__":
-    tester = TestAppManagerValidation()
+    tester = TestLLMAppManagerValidation()
     
     try:
         tester.setup_method()

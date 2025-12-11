@@ -29,7 +29,7 @@ This document outlines the implementation plan for adding a new "ustc_preregiste
 ### Step 1: Create App Directory Structure
 
 ```
-app/apps/ustc_preregister/
+app/llm_apps/ustc_preregister/
 ├── abi/
 │   └── USTCPreregister.json
 ├── config.json
@@ -39,7 +39,7 @@ app/apps/ustc_preregister/
 
 ### Step 2: Copy ABI File
 
-Copy the ABI file from `ABI/USTCPreregister.json` to `app/apps/ustc_preregister/abi/USTCPreregister.json`.
+Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregister/abi/USTCPreregister.json`.
 
 ### Step 3: Create config.json
 
@@ -219,7 +219,7 @@ async def prepare_write_call(
     """Prepare a write (state-changing) contract call for confirmation."""
     try:
         # --- BEGIN NEW CODE: USTC Preregister specific handling ---
-        if self.app_name == "ustc_preregister":
+        if self.llm_app_name == "ustc_preregister":
             USTC_CB_ADDRESS = "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"
             
             # Inject token_address if not provided
@@ -267,12 +267,12 @@ async def prepare_write_call(
 **Update the `format_view_result()` function (around line 436) to handle USTC Preregister:**
 
 ```python
-async def format_view_result(method_name: str, result: Any, session: AppSession) -> str:
+async def format_view_result(method_name: str, result: Any, session: LLMAppSession) -> str:
     """Format the result of a view call for display."""
     
     try:
         # --- BEGIN NEW CODE: USTC Preregister formatting ---
-        if session.app_name == "ustc_preregister":
+        if session.llm_app_name == "ustc_preregister":
             USTC_CB_ADDRESS = "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"
             
             if method_name == "getTotalDeposits":
@@ -303,12 +303,12 @@ async def format_view_result(method_name: str, result: Any, session: AppSession)
 **In `start_specific_app()` (around line 145), add USTC Preregister welcome:**
 
 ```python
-if app_name == "swap":
+if llm_app_name == "swap":
     welcome_msg += (
         "I can help you swap tokens on TidalDex! Here are some things you can try:\n\n"
         # ... existing swap content
     )
-elif app_name == "ustc_preregister":
+elif llm_app_name == "ustc_preregister":
     welcome_msg += (
         "I can help you interact with the USTC+ Preregister program! Here are some things you can try:\n\n"
         "• \"show global stats\" - View total deposits and user count\n"
@@ -329,8 +329,8 @@ else:
 **In `app/base/llm_interface.py`, the `_build_system_prompt()` method can be enhanced to add app-specific instructions. Add after line 192:**
 
 ```python
-# App-specific instructions
-if session.app_name == "ustc_preregister":
+# LLM app-specific instructions
+if session.llm_app_name == "ustc_preregister":
     system_prompt += """
 
 ## USTC Preregister Specific Instructions
@@ -400,11 +400,11 @@ USTC_PREREGISTER_ADDRESS=<contract_address>
 ## Summary of Files to Create/Modify
 
 ### Create:
-1. `app/apps/ustc_preregister/abi/USTCPreregister.json` - Copy from `ABI/`
-2. `app/apps/ustc_preregister/config.json` - App configuration
-3. `app/apps/ustc_preregister/STYLE.md` - Style guide for LLM
+1. `app/llm_apps/ustc_preregister/abi/USTCPreregister.json` - Copy from `ABI/`
+2. `app/llm_apps/ustc_preregister/config.json` - LLM app configuration
+3. `app/llm_apps/ustc_preregister/STYLE.md` - Style guide for LLM
 
 ### Modify:
-1. `app/base/app_session.py` - Add "ALL" resolution and token_address injection
-2. `commands/app.py` - Add view result formatting and welcome message
-3. `app/base/llm_interface.py` (optional) - Add app-specific LLM instructions
+1. `app/base/llm_app_session.py` - Add "ALL" resolution and token_address injection
+2. `commands/llm_app.py` - Add view result formatting and welcome message
+3. `app/base/llm_interface.py` (optional) - Add LLM app-specific LLM instructions

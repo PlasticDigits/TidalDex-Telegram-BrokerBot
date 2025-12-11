@@ -49,7 +49,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
         "/swap - Trade BNB or tokens\n"
-        "/app - Conversational blockchain apps (e.g., /app swap)\n"
+        "/llm_app - Conversational blockchain LLM apps (e.g., /llm_app swap)\n"
         "/receive - Show your wallet address for receiving funds\n\n"
         
         "Token Tracking:\n"
@@ -107,7 +107,7 @@ async def universal_help_command(update: Update, context: ContextTypes.DEFAULT_T
         "/balance - Check BNB and token balances\n"
         "/send - Send BNB or tokens\n"
         "/swap - Trade BNB or tokens\n"
-        "/app - Conversational blockchain apps (e.g., /app swap)\n"
+        "/llm_app - Conversational blockchain LLM apps (e.g., /llm_app swap)\n"
         "/receive - Show your wallet address for receiving funds\n\n"
         
         "Token Tracking:\n"
