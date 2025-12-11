@@ -22,7 +22,7 @@ class LLMInterface:
             raise ValueError("OPENAI_API_KEY environment variable not set")
         
         self.base_url = "https://api.openai.com/v1"
-        self.model = "gpt-4o-mini"  # Cost-effective model for this use case
+        self.model = "gpt-5-nano"  # Cheapest model: $0.05/$0.40 per 1M tokens (input/output)
         self.max_tokens = 1000
         
     async def process_user_message(

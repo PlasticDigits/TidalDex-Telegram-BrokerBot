@@ -41,7 +41,7 @@ class LLMSchemaTester:
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.schema_path = project_root / "app" / "schemas" / "app_json_schema.json"
         self.base_url = "https://api.openai.com/v1"
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-5-nano"  # Cheapest model for testing
     
     def load_schema(self) -> dict:
         """Load and validate the JSON schema file.
