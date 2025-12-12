@@ -46,7 +46,7 @@ class OFACManager:
         try:
             logger.info(f"Fetching OFAC sanctions list from {self.OFAC_LIST_URL}")
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.get(self.OFAC_LIST_URL)
                 response.raise_for_status()
                 

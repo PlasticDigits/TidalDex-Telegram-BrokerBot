@@ -129,7 +129,7 @@ async def send_bnb(
     
     while attempts < max_attempts:
         try:
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
             
             if status_callback:
                 await status_callback(status_callback_prepend + f"Transaction confirmed in block {receipt['blockNumber']}")
@@ -295,7 +295,7 @@ async def send_token(
         
         while attempts < max_attempts:
             try:
-                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
                 
                 if status_callback:
                     await status_callback(f"Transaction confirmed in block {receipt['blockNumber']}")
@@ -434,7 +434,7 @@ async def send_contract_call(
     
     while attempts < max_attempts:
         try:
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
             
             if status_callback:
                 await status_callback(f"Transaction confirmed in block {receipt['blockNumber']}")

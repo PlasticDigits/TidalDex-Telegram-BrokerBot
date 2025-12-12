@@ -357,7 +357,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             payload["max_tokens"] = max_tokens
             payload["temperature"] = 0.1  # Lower temperature for more consistent responses
         
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,
