@@ -4,6 +4,7 @@ LLM app session management for tracking conversation state and handling transact
 import logging
 import json
 import os
+import time
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
@@ -55,8 +56,10 @@ class LLMAppSession:
         
         # Initialize wallet and token context
         self.wallet_info: Optional[Dict[str, Any]] = None
+        self.active_wallet_name: Optional[str] = None
         self.tracked_tokens: List[Dict[str, Any]] = []
         self.token_balances: Dict[str, Any] = {}
+        self._last_context_refresh_ts: float = 0.0
         
     async def initialize_context(self) -> bool:
         """Initialize session context with user's wallet and token information.
@@ -65,36 +68,72 @@ class LLMAppSession:
             bool: True if context was successfully initialized
         """
         try:
-            # Get active wallet
-            wallet_name = wallet_manager.get_active_wallet_name(self.user_id)
-            if not wallet_name:
-                logger.warning(f"No active wallet for user {hash_user_id(self.user_id)}")
+            if not await self.refresh_context(force=True):
                 return False
-            
-            # Get user's PIN if needed
-            user_id_int = int(self.user_id)
-            pin = pin_manager.get_pin(user_id_int) if pin_manager.needs_pin(user_id_int) else None
-            
-            # Get wallet info
-            self.wallet_info = wallet_manager.get_wallet_by_name(self.user_id, wallet_name, pin)
-            if not self.wallet_info:
-                logger.error(f"Failed to get wallet {wallet_name} for user {hash_user_id(self.user_id)}")
-                return False
-            
-            # Get tracked tokens
-            self.tracked_tokens = await token_manager.get_tracked_tokens(self.user_id)
-            
-            # Get token balances
-            self.token_balances = await token_manager.balances(self.user_id)
-            
-            # Build context for LLM
-            self.context = await self._build_llm_context()
             
             logger.info(f"Initialized context for user {hash_user_id(self.user_id)} in LLM app {self.llm_app_name}")
             return True
             
         except Exception as e:
             logger.error(f"Failed to initialize context for user {hash_user_id(self.user_id)}: {str(e)}")
+            return False
+
+    async def refresh_context(self, *, force: bool = False) -> bool:
+        """Refresh wallet/token context for this session.
+
+        This prevents the LLM from making decisions based on stale wallet selection
+        or outdated token balances (e.g., user switched active wallet between turns).
+
+        Args:
+            force: If True, refresh regardless of cache age.
+
+        Returns:
+            bool: True if refreshed successfully, False otherwise.
+        """
+        try:
+            wallet_name = wallet_manager.get_active_wallet_name(self.user_id)
+            if not wallet_name:
+                logger.warning("No active wallet for user %s", hash_user_id(self.user_id))
+                return False
+
+            # Refresh immediately if wallet changed since last turn.
+            wallet_changed = self.active_wallet_name != wallet_name
+
+            # Swap app is balance-sensitive; keep it fresh.
+            always_refresh_for_app = self.llm_app_name == "swap"
+
+            if not force and not wallet_changed and not always_refresh_for_app:
+                # For non-swap apps, refresh at most every 30s.
+                if (time.time() - self._last_context_refresh_ts) < 30:
+                    return True
+
+            user_id_int = int(self.user_id)
+            pin = pin_manager.get_pin(user_id_int) if pin_manager.needs_pin(user_id_int) else None
+
+            wallet_info = wallet_manager.get_wallet_by_name(self.user_id, wallet_name, pin)
+            if not wallet_info:
+                logger.error(
+                    "Failed to get wallet %s for user %s",
+                    wallet_name,
+                    hash_user_id(self.user_id),
+                )
+                return False
+
+            self.wallet_info = wallet_info
+            self.active_wallet_name = wallet_name
+
+            # Tracked tokens are user-level; safe to refresh each time.
+            self.tracked_tokens = await token_manager.get_tracked_tokens(self.user_id)
+
+            # Token balances are wallet-specific.
+            self.token_balances = await token_manager.balances(self.user_id)
+
+            # Build context for LLM
+            self.context = await self._build_llm_context()
+            self._last_context_refresh_ts = time.time()
+            return True
+        except Exception as e:
+            logger.error("Failed to refresh context for user %s: %s", hash_user_id(self.user_id), str(e))
             return False
     
     async def _build_llm_context(self) -> Dict[str, Any]:
@@ -118,6 +157,7 @@ class LLMAppSession:
         return {
             "app_name": self.llm_app_name,
             "app_description": self.llm_app_config["description"],
+            "wallet_name": self.active_wallet_name,
             "wallet_address": wallet_address,
             "tracked_tokens": self.tracked_tokens,
             "token_balances": balance_info,
@@ -309,7 +349,11 @@ class LLMAppSession:
             
             # Process parameters
             processed_params = await transaction_manager.process_parameters(
-                method_config, parameters, self.llm_app_config
+                method_config,
+                parameters,
+                self.llm_app_config,
+                user_id=self.user_id,
+                wallet_address=self.wallet_info.get("address"),
             )
             
             # TidalDex swap routing: probe multiple routes and pick best
@@ -386,7 +430,8 @@ class LLMAppSession:
                 method_config,
                 parameters,
                 self.llm_app_config,
-                self.wallet_info["address"]
+                self.wallet_info["address"],
+                user_id=self.user_id
             )
             
             # Use processed_params from preview (already has defaults resolved)

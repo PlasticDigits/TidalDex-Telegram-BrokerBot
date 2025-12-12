@@ -15,8 +15,10 @@ from db.tokens import (
     untrack_token,
     get_tracked_tokens as db_get_tracked_tokens,
     is_token_tracked,
-    get_token_by_address
+    get_token_by_address,
+    get_all_tracked_tokens_by_symbol
 )
+from db.connection import execute_query
 from db.track import get_token_balance_history as db_get_token_balance_history
 from services.wallet import wallet_manager
 from services.pin import pin_manager
@@ -165,7 +167,75 @@ class TokenManager:
             
         logger.info(f"Successfully parsed {len(default_tokens)} tokens from default token list")
         self.default_tokens = default_tokens
+        
         return default_tokens
+    
+    async def cleanup_migrated_tokens(self) -> None:
+        """Explicitly clean up migrated tokens for all users.
+        
+        This should be called explicitly when token migrations are known to have occurred,
+        not automatically on every token list parse. The cleanup untracks old token addresses
+        when a symbol appears in the default token list at a different address.
+        
+        Warning: This affects ALL users who have tracked tokens with symbols that appear
+        in the default token list. Only call this when you know tokens have migrated.
+        """
+        if not self.default_tokens:
+            await self._parse_default_token_list()
+        await self._cleanup_token_migrations(self.default_tokens)
+    
+    async def _cleanup_token_migrations(self, default_tokens: Dict[ChecksumAddress, TokenDetails]) -> None:
+        """Clean up token migrations: untrack old tokens when symbol appears in default list.
+        
+        When tokens migrate to new addresses (e.g., CL8Y), users may have tracked the old address.
+        If the symbol appears in the default token list, we assume that's the "current" token and
+        should untrack any user-tracked tokens with the same symbol but different addresses.
+        
+        Args:
+            default_tokens: Dictionary of tokens from default token list
+        """
+        try:
+            # Build a map of symbol -> address from default token list
+            default_symbol_to_address: Dict[str, ChecksumAddress] = {}
+            for address, details in default_tokens.items():
+                symbol_upper = details['symbol'].upper()
+                # If multiple tokens with same symbol in default list, keep the first one
+                # (this shouldn't happen often, but handle it gracefully)
+                if symbol_upper not in default_symbol_to_address:
+                    default_symbol_to_address[symbol_upper] = address
+            
+            # For each symbol in default list, check for tracked tokens with different addresses
+            for symbol_upper, default_address in default_symbol_to_address.items():
+                # Get all tracked tokens with this symbol (across all users)
+                tracked_tokens = get_all_tracked_tokens_by_symbol(symbol_upper)
+                
+                for tracked_token in tracked_tokens:
+                    tracked_address = w3.to_checksum_address(tracked_token['token_address'])
+                    
+                    # If tracked address is different from default address, untrack it
+                    if tracked_address.lower() != default_address.lower():
+                        hashed_user_id = tracked_token.get('user_id')
+                        if hashed_user_id:
+                            # user_id from database is already hashed, use internal sync method
+                            logger.info(
+                                f"Token migration detected: symbol '{symbol_upper}' has migrated. "
+                                f"Untracking old address {tracked_address} for user {hashed_user_id[:16]}.... "
+                                f"New address: {default_address}"
+                            )
+                            try:
+                                self._untrack_by_hashed_user_id(
+                                    hashed_user_id, 
+                                    tracked_address, 
+                                    tracked_token.get('chain_id', 56)
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to untrack migrated token {tracked_address} "
+                                    f"for user {hashed_user_id[:16]}...: {str(e)}"
+                                )
+        except Exception as e:
+            logger.error(f"Failed to cleanup token migrations: {str(e)}")
+            # Don't raise - this is a cleanup operation, shouldn't block other functionality
 
     async def track(self, user_id: str, token_address: str, chain_id: int = 56) -> bool:
         """Track a new ERC20 token for a specific user.
@@ -220,7 +290,7 @@ class TokenManager:
         """Stop tracking an ERC20 token for a specific user.
         
         Args:
-            user_id: ID of the user to untrack the token for
+            user_id: ID of the user to untrack the token for (will be hashed)
             token_address: Address of the ERC20 token to untrack
             chain_id: Chain ID where the token exists (default: 56 for BSC)
             
@@ -229,11 +299,45 @@ class TokenManager:
         """
         try:
             token_address = w3.to_checksum_address(token_address)
-            await untrack_token(user_id, token_address, chain_id)
+            # untrack_token is a sync function
+            untrack_token(user_id, token_address, chain_id)
             logger.info(f"Stopped tracking token {token_address} for user {hash_user_id(user_id)}")
             return True
         except Exception as e:
             logger.error(f"Failed to untrack token {token_address} for user {hash_user_id(user_id)}: {str(e)}")
+            return False
+    
+    def _untrack_by_hashed_user_id(self, hashed_user_id: str, token_address: str, chain_id: int = 56) -> bool:
+        """Stop tracking an ERC20 token for a user identified by hashed user_id.
+        
+        Internal method for cleanup operations where we already have the hashed user_id
+        from database queries. This is a sync method since it uses sync database operations.
+        
+        Args:
+            hashed_user_id: Already-hashed user ID from database
+            token_address: Address of the ERC20 token to untrack
+            chain_id: Chain ID where the token exists (default: 56 for BSC)
+            
+        Returns:
+            bool: True if token was successfully untracked, False otherwise
+        """
+        try:
+            token_address = w3.to_checksum_address(token_address)
+            # Get the token_id
+            get_token_id_query = "SELECT id FROM tokens WHERE token_address = %s AND chain_id = %s"
+            token_result = execute_query(get_token_id_query, (token_address, chain_id), fetch='one')
+            if not token_result:
+                logger.warning(f"Token {token_address} not found, cannot untrack")
+                return False
+            token_id = token_result['id']
+            
+            # Remove from user_tracked_tokens using hashed user_id directly
+            untrack_query = "DELETE FROM user_tracked_tokens WHERE user_id = %s AND token_id = %s"
+            execute_query(untrack_query, (hashed_user_id, token_id))
+            logger.info(f"Stopped tracking token {token_address} for hashed user {hashed_user_id[:16]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to untrack token {token_address} for hashed user {hashed_user_id[:16]}...: {str(e)}")
             return False
 
     async def scan(self, user_id: str, chain_id: int = 56, status_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> List[ChecksumAddress]:

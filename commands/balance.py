@@ -24,6 +24,42 @@ from db.utils import hash_user_id
 # Configure module logger
 logger = logging.getLogger(__name__)
 
+
+def _format_token_balances(token_balances: Dict[str, Any]) -> List[str]:
+    """Format token balances for display, showing addresses for duplicate symbols.
+    
+    Args:
+        token_balances: Dictionary of token address -> balance info
+        
+    Returns:
+        List of formatted balance strings
+    """
+    if not token_balances:
+        return []
+    
+    # Group by symbol to detect duplicates
+    symbol_counts: Dict[str, int] = {}
+    for balance_info in token_balances.values():
+        symbol = str(balance_info.get('symbol', '')).strip().upper()
+        symbol_counts[symbol] = symbol_counts.get(symbol, 0) + 1
+    
+    balance_lines: List[str] = []
+    for token_addr, balance_info in token_balances.items():
+        symbol: str = str(balance_info.get('symbol', '')).strip()
+        name: str = balance_info.get('name', 'Unknown')
+        formatted_balance: str = format_token_balance(
+            balance_info.get('raw_balance', 0),
+            balance_info.get('decimals', 18)
+        )
+        # Show address if duplicate symbol exists
+        if symbol_counts.get(symbol.upper(), 0) > 1:
+            addr_short = token_addr[:8] + '...' + token_addr[-6:]
+            balance_lines.append(f"• {symbol} ({name}) [{addr_short}]: {formatted_balance}")
+        else:
+            balance_lines.append(f"• {symbol} ({name}): {formatted_balance}")
+    
+    return balance_lines
+
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Display wallet balance including BNB and tracked tokens."""
     user = update.effective_user
@@ -106,14 +142,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 # Add token balances if any
                 if token_balances:
                     msg_text.append("📊 Token Balances:")
-                    for token_addr, balance_info in token_balances.items():
-                        price_sym: str = balance_info['symbol']
-                        price_name: str = balance_info['name']
-                        price_balance: str = format_token_balance(
-                            balance_info['raw_balance'],
-                            balance_info['decimals']
-                        )
-                        msg_text.append(f"• {price_sym} ({price_name}): {price_balance}")
+                    msg_text.extend(_format_token_balances(token_balances))
                 
                 msg_text.append("\nUse /send to transfer funds.")
                 msg_text.append("Use /scan to search for tokens.")
@@ -135,14 +164,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 # Add token balances if any
                 if token_balances:
                     balance_msg_text.append("📊 Token Balances:")
-                    for token_addr, balance_info in token_balances.items():
-                        no_price_sym: str = balance_info['symbol']
-                        no_price_name: str = balance_info['name']
-                        no_price_balance: str = format_token_balance(
-                            balance_info['raw_balance'],
-                            balance_info['decimals']
-                        )
-                        balance_msg_text.append(f"• {no_price_sym} ({no_price_name}): {no_price_balance}")
+                    balance_msg_text.extend(_format_token_balances(token_balances))
                 
                 balance_msg_text.append("\nUse /send to transfer funds.")
                 balance_msg_text.append("Use /swap to trade BNB or tokens.")
@@ -164,14 +186,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             # Add token balances if any
             if token_balances:
                 error_msg_text.append("📊 Token Balances:")
-                for token_addr, balance_info in token_balances.items():
-                    error_sym: str = balance_info['symbol']
-                    error_nm: str = balance_info['name']
-                    error_bal: str = format_token_balance(
-                        balance_info['raw_balance'],
-                        balance_info['decimals']
-                    )
-                    error_msg_text.append(f"• {error_sym} ({error_nm}): {error_bal}")
+                error_msg_text.extend(_format_token_balances(token_balances))
             
             error_msg_text.append("\nUse /send to transfer funds.")
             error_msg_text.append("Use /swap to trade BNB or tokens.")

@@ -73,6 +73,13 @@ class LLMInterface:
         try:
             # Add user message to conversation history
             session.add_message("user", user_message)
+
+            # Refresh session context so the model sees the current active wallet/balances.
+            # This prevents stale context from causing "0 balance" hallucinations.
+            try:
+                await session.refresh_context(force=False)
+            except Exception as e:
+                logger.warning("Failed to refresh LLM session context: %s", str(e))
             
             # Build system prompt
             system_prompt = await self._build_system_prompt(session)
@@ -200,12 +207,26 @@ class LLMInterface:
         for method in llm_app_config["available_methods"].get("write", []):
             write_methods.append(f"- **{method['name']}**: {method['description']}")
         
-        # Format user's token balances
+        # Format user's token balances (include addresses for disambiguation)
         balance_info = ""
         if context.get("token_balances"):
             balance_lines = []
             for token in context["token_balances"]:
-                balance_lines.append(f"- {token['balance']} {token['symbol']} ({token['name']})")
+                # Format balance (handle both float and string)
+                balance = token.get('balance', 0)
+                if isinstance(balance, float):
+                    # Format float to reasonable precision
+                    balance_str = f"{balance:.6f}".rstrip('0').rstrip('.')
+                else:
+                    balance_str = str(balance)
+                
+                # Include abbreviated address to help disambiguate tokens with same symbol
+                address = token.get('address', '')
+                if address and len(address) >= 16:
+                    address_short = address[:10] + '...' + address[-6:]
+                    balance_lines.append(f"- {balance_str} {token['symbol']} ({token['name']}) [{address_short}]")
+                else:
+                    balance_lines.append(f"- {balance_str} {token['symbol']} ({token['name']})")
             balance_info = f"\n\n**Your Token Balances:**\n" + "\n".join(balance_lines)
         
         system_prompt = f"""You are an expert assistant for the {llm_app_config['name']} LLM app on TidalDex.
@@ -215,6 +236,7 @@ class LLMInterface:
 **Description:** {llm_app_config['description']}
 
 ## User Context
+**Active Wallet:** {context.get('wallet_name', 'Not available')}
 **Wallet Address:** {context.get('wallet_address', 'Not available')}
 {balance_info}
 

@@ -138,4 +138,41 @@ def get_token_by_address(token_address: str, chain_id: int = 56) -> Optional[Dic
         'name': result['token_name'],
         'decimals': result['token_decimals'],
         'chain_id': result['chain_id']
-    } 
+    }
+
+@retry_decorator(5, 0.1)
+def get_all_tracked_tokens_by_symbol(symbol: str) -> List[Dict[str, Any]]:
+    """Get all tracked tokens across all users by symbol.
+    
+    Used for token migration cleanup - when a token symbol appears in the default
+    token list, we need to find all user-tracked tokens with that symbol to check
+    if they need to be untracked (if they're different from the default list address).
+    
+    Args:
+        symbol: Token symbol to search for (case-insensitive)
+        
+    Returns:
+        List[Dict[str, Any]]: List of tracked token entries with user_id, token_address, chain_id
+    """
+    query = """
+    SELECT DISTINCT
+        utt.user_id,
+        t.token_address,
+        t.token_symbol,
+        t.chain_id
+    FROM user_tracked_tokens utt
+    JOIN tokens t ON t.id = utt.token_id
+    WHERE UPPER(t.token_symbol) = UPPER(%s)
+    """
+    result = execute_query(query, (symbol,), fetch='all')
+    if not result:
+        return []
+    return [
+        {
+            'user_id': row['user_id'],
+            'token_address': row['token_address'],
+            'symbol': row['token_symbol'],
+            'chain_id': row['chain_id']
+        }
+        for row in result
+    ] 
