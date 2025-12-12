@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from typing import Dict, List, Any, Optional, Union
 import logging
 import asyncio
-from services.pin.pin_decorators import conversation_pin_helper
+from services.pin.pin_decorators import conversation_pin_helper, PIN_REQUEST
 from services.wallet import wallet_manager
 from services.pin import pin_manager
 from app.base import llm_app_manager
@@ -21,6 +21,33 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 CHOOSING_APP, CONVERSING, CONFIRMING_TRANSACTION = range(3)
+
+
+def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
+    """Generate welcome message for an LLM app.
+    
+    Args:
+        llm_app_name: Name of the LLM app
+        description: Description of the LLM app from config
+        
+    Returns:
+        Formatted welcome message string
+    """
+    welcome_msg = f"🚀 **{llm_app_name.title()} LLM App Started**\n\n{description}\n\n"
+    
+    if llm_app_name == "swap":
+        welcome_msg += (
+            "I can help you swap tokens on TidalDex! Here are some things you can try:\n\n"
+            "• \"swap 1.5 cake for busd\"\n"
+            "• \"trade 100 usdt for bnb with low slippage\"\n"
+            "• \"what's the price of cake in busd?\"\n"
+            "• \"show me current swap rates\"\n\n"
+            "What would you like to do?"
+        )
+    else:
+        welcome_msg += "How can I help you today?"
+    
+    return welcome_msg
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the LLM app system or show available LLM apps."""
@@ -141,19 +168,7 @@ async def start_specific_app(update: Update, context: ContextTypes.DEFAULT_TYPE,
     
     # Send welcome message
     style_guide = llm_app_manager.load_llm_app_style_guide(llm_app_name)
-    welcome_msg = f"🚀 **{llm_app_name.title()} LLM App Started**\n\n{llm_app_config['description']}\n\n"
-    
-    if llm_app_name == "swap":
-        welcome_msg += (
-            "I can help you swap tokens on TidalDex! Here are some things you can try:\n\n"
-            "• \"swap 1.5 cake for busd\"\n"
-            "• \"trade 100 usdt for bnb with low slippage\"\n"
-            "• \"what's the price of cake in busd?\"\n"
-            "• \"show me current swap rates\"\n\n"
-            "What would you like to do?"
-        )
-    else:
-        welcome_msg += "How can I help you today?"
+    welcome_msg = get_llm_app_welcome_message(llm_app_name, llm_app_config['description'])
     
     await update.message.reply_text(welcome_msg, parse_mode='Markdown')
     
@@ -181,14 +196,36 @@ async def handle_app_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         user_id = str(update.effective_user.id)
         
         # Start the specific LLM app
-        return await start_specific_app_from_callback(query, context, user_id, llm_app_name)
+        return await start_specific_app_from_callback(update, query, context, user_id, llm_app_name)
     
     return ConversationHandler.END
 
-async def start_specific_app_from_callback(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, user_id: str, llm_app_name: str) -> int:
+async def start_specific_app_from_callback(
+    update: Update,
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: str,
+    llm_app_name: str
+) -> int:
     """Start a specific LLM app from callback query."""
     
     try:
+        # If the user has a PIN set but hasn't verified it yet, request it BEFORE
+        # starting the app session. This prevents wallet decryption attempts and
+        # downstream "PIN required but not available" errors during session init.
+        user_id_int = int(user_id)
+        if pin_manager.needs_to_verify_pin(user_id_int):
+            if context.user_data is None:
+                context.user_data = {}
+            context.user_data['pending_command'] = 'llm_app_start_from_callback'
+            context.user_data['pending_llm_app_name'] = llm_app_name
+            await query.edit_message_text(
+                f"🔒 Starting **{llm_app_name.title()}** requires your PIN for security.\n\n"
+                f"Please enter your PIN.",
+                parse_mode='Markdown',
+            )
+            return PIN_REQUEST
+
         # Start the LLM app session
         session = await llm_app_manager.start_llm_app_session(user_id, llm_app_name)
         if not session:
@@ -204,19 +241,7 @@ async def start_specific_app_from_callback(query: CallbackQuery, context: Contex
         
         # Get LLM app config for welcome message
         llm_app_config = llm_app_manager.get_llm_app_config(llm_app_name)
-        welcome_msg = f"🚀 **{llm_app_name.title()} LLM App Started**\n\n{llm_app_config['description']}\n\n"
-        
-        if llm_app_name == "swap":
-            welcome_msg += (
-                "I can help you swap tokens on TidalDex! Here are some things you can try:\n\n"
-                "• \"swap 1.5 cake for busd\"\n"
-                "• \"trade 100 usdt for bnb with low slippage\"\n"
-                "• \"what's the price of cake in busd?\"\n"
-                "• \"show me current swap rates\"\n\n"
-                "What would you like to do?"
-            )
-        else:
-            welcome_msg += "How can I help you today?"
+        welcome_msg = get_llm_app_welcome_message(llm_app_name, llm_app_config['description'])
         
         await query.edit_message_text(welcome_msg, parse_mode='Markdown')
         return CONVERSING
@@ -226,13 +251,17 @@ async def start_specific_app_from_callback(query: CallbackQuery, context: Contex
         await query.edit_message_text(f"❌ Failed to start {llm_app_name} LLM app: {str(e)}")
         return ConversationHandler.END
 
-async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle conversational input from user."""
+async def _process_llm_message(update: Update, context: ContextTypes.DEFAULT_TYPE, user_message: str) -> int:
+    """Process a user message with the LLM (internal helper function).
     
-    if update.message is None or update.message.text is None:
-        return CONVERSING
-    
-    user_message = update.message.text.strip()
+    Args:
+        update: Telegram update object
+        context: Context object
+        user_message: The user's message to process
+        
+    Returns:
+        Next conversation state
+    """
     user_id = str(update.effective_user.id)
     
     # Get session from context
@@ -277,6 +306,34 @@ async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"Please try rephrasing your request or use `/cancel` to start over."
         )
         return CONVERSING
+
+async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle conversational input from user."""
+    
+    if update.message is None or update.message.text is None:
+        return CONVERSING
+    
+    user_message = update.message.text.strip()
+    user_id_int = update.effective_user.id
+    user_id = str(user_id_int)
+    
+    # If a PIN is set but not verified yet, request it and do NOT call the LLM.
+    if pin_manager.needs_to_verify_pin(user_id_int):
+        logger.info(
+            f"PIN required but not available for user {hash_user_id(user_id)} in LLM app conversation"
+        )
+        if context.user_data is None:
+            context.user_data = {}
+        # Store the user message to process after PIN verification
+        context.user_data['pending_llm_message'] = user_message
+        context.user_data['pending_command'] = 'llm_app_conversation'
+        await update.message.reply_text(
+            "🔒 This LLM app requires your PIN to access your wallet. Please enter your PIN."
+        )
+        return PIN_REQUEST
+    
+    # Process the message
+    return await _process_llm_message(update, context, user_message)
 
 async def handle_view_call(update: Update, context: ContextTypes.DEFAULT_TYPE, session: LLMAppSession, response: Dict[str, Any]) -> int:
     """Handle a view (read-only) contract call."""

@@ -68,6 +68,80 @@ async def handle_conversation_pin_request(update: Update, context: ContextTypes.
         await update.message.reply_text("Error: No command to execute. Please try your command again.")
         return ConversationHandler.END
 
+    # Handle LLM app start continuation (when user started via inline keyboard callback)
+    if pending_command == 'llm_app_start_from_callback':
+        llm_app_name = context.user_data.get('pending_llm_app_name')
+        if not llm_app_name:
+            logger.error("No pending LLM app name found in context")
+            await update.message.reply_text("Error: No LLM app to start. Please try again.")
+            return ConversationHandler.END
+
+        # Clear pending info before performing work (avoid duplicate execution on retries)
+        del context.user_data['pending_llm_app_name']
+        del context.user_data['pending_command']
+
+        await update.message.reply_text("PIN verified. Starting the LLM app...")
+
+        try:
+            # Import lazily to avoid circular import at module load time.
+            from app.base import llm_app_manager
+
+            user_id_str = str(update.effective_user.id)
+            session = await llm_app_manager.start_llm_app_session(user_id_str, llm_app_name)
+            if not session:
+                await update.message.reply_text(
+                    f"❌ Failed to start {llm_app_name} LLM app. Please check your wallet and try again."
+                )
+                return ConversationHandler.END
+
+            context.user_data['llm_app_session'] = session
+
+            llm_app_config = llm_app_manager.get_llm_app_config(llm_app_name)
+            description = ""
+            if isinstance(llm_app_config, dict):
+                description = str(llm_app_config.get("description", ""))
+            
+            # Import welcome message helper to avoid duplication
+            from commands.llm_app import get_llm_app_welcome_message
+            welcome_msg = get_llm_app_welcome_message(llm_app_name, description)
+
+            await update.message.reply_text(welcome_msg, parse_mode='Markdown')
+            # Import state constant lazily (keeps this module generic)
+            from commands.llm_app import CONVERSING
+            return CONVERSING
+        except Exception as e:
+            logger.error(f"Error starting LLM app after PIN verification: {e}")
+            await update.message.reply_text("Error starting the LLM app. Please try again.")
+            return ConversationHandler.END
+
+    # Handle LLM app conversation continuation
+    if pending_command == 'llm_app_conversation':
+        # Get the stored user message
+        pending_message = context.user_data.get('pending_llm_message')
+        if not pending_message:
+            logger.error("No pending LLM message found in context")
+            await update.message.reply_text("Error: No message to process. Please try again.")
+            return ConversationHandler.END
+        
+        # Clear the pending message
+        del context.user_data['pending_llm_message']
+        del context.user_data['pending_command']
+        
+        # Update the message to show the PIN was verified
+        await update.message.reply_text("PIN verified. Processing your request...")
+        
+        # Import and call the internal processing function with the stored message.
+        # NOTE: Do not mutate `update.message.text` here. PTB Message fields may be
+        # immutable / not intended for mutation, and `_process_llm_message` takes
+        # the user message as an explicit argument anyway.
+        try:
+            from commands.llm_app import _process_llm_message
+            return await _process_llm_message(update, context, pending_message)
+        except Exception as e:
+            logger.error(f"Error processing LLM app conversation after PIN verification: {e}")
+            await update.message.reply_text("Error processing your request. Please try again.")
+            return ConversationHandler.END
+    
     # Update the message to show the PIN was verified
     await update.message.reply_text("PIN verified. Continuing with your command...")
     
