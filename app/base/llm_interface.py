@@ -32,7 +32,14 @@ class LLMInterface:
         self.model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
         # Output token budget. Kept relatively small for cost, but we may retry with a larger
         # budget if the model returns truncated/empty output.
-        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+        try:
+            self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+        except ValueError:
+            logger.warning(
+                "Invalid OPENAI_MAX_TOKENS value '%s', using default 1000",
+                os.getenv("OPENAI_MAX_TOKENS"),
+            )
+            self.max_tokens = 1000
         
         # Newer models (gpt-5-*, o1-*, o3-*) use max_completion_tokens instead of max_tokens
         self._uses_new_token_param = self._check_new_model_format(self.model)
@@ -299,6 +306,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
         Args:
             messages: Conversation messages
             function_schema: JSON schema for function calling
+            max_tokens_override: Optional token limit override (used for retries with higher budget)
             
         Returns:
             OpenAI API response
@@ -413,11 +421,35 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
         # Unknown/unsupported type
         return None
 
+    def _extract_finish_reason(self, response: Dict[str, Any]) -> Optional[str]:
+        """Extract finish_reason from OpenAI response safely.
+        
+        Args:
+            response: Raw OpenAI API response
+            
+        Returns:
+            The finish_reason string or None if not available
+        """
+        try:
+            choices = response.get("choices")
+            if isinstance(choices, list) and choices:
+                return choices[0].get("finish_reason")
+        except Exception:
+            pass
+        return None
+
     def _get_retry_max_tokens(self, base_max_tokens: int) -> int:
-        """Compute a safe, higher output budget for a single retry."""
+        """Compute a safe, higher output budget for a single retry.
+        
+        Args:
+            base_max_tokens: The original max_tokens value used in the first attempt
+            
+        Returns:
+            A higher token budget, capped at a reasonable maximum to avoid excessive costs
+        """
         # Ensure enough budget to emit the required JSON object even if the first attempt
-        # had an extremely low cap.
-        return max(512, base_max_tokens * 4)
+        # had an extremely low cap. Cap at 4096 to avoid excessive API costs.
+        return min(4096, max(512, base_max_tokens * 4))
     
     def _parse_openai_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse OpenAI API response.
@@ -528,11 +560,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                     "Please try rephrasing your request."
                 ),
                 "error": "json_parse_error",
-                "_llm_finish_reason": (
-                    response.get("choices", [{}])[0].get("finish_reason")  # type: ignore[union-attr]
-                    if isinstance(response.get("choices"), list) and response.get("choices")
-                    else None
-                ),
+                "_llm_finish_reason": self._extract_finish_reason(response),
             }
         except Exception as e:
             logger.error(f"Failed to parse OpenAI response: {str(e)}")
@@ -540,11 +568,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                 "response_type": "chat", 
                 "message": "I encountered an error processing your request.",
                 "error": str(e),
-                "_llm_finish_reason": (
-                    response.get("choices", [{}])[0].get("finish_reason")  # type: ignore[union-attr]
-                    if isinstance(response.get("choices"), list) and response.get("choices")
-                    else None
-                ),
+                "_llm_finish_reason": self._extract_finish_reason(response),
             }
     
     def _parse_api_error(self, response: httpx.Response) -> str:

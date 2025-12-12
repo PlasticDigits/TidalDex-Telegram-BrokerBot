@@ -326,6 +326,48 @@ class TestLLMResponseParsing:
         assert parsed["response_type"] == "chat"
         assert parsed.get("error") == "empty_llm_response"
         assert parsed.get("_llm_finish_reason") == "length"
+
+    def test_finish_reason_none(self):
+        """Test parsing when finish_reason is None (edge case)."""
+        response = {
+            "response_type": "chat",
+            "message": "Hello with no finish reason!"
+        }
+        mock_api_response = {
+            "choices": [
+                {
+                    "finish_reason": None,
+                    "message": {
+                        "content": json.dumps(response)
+                    },
+                }
+            ]
+        }
+        parsed = self.llm._parse_openai_response(mock_api_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Hello with no finish reason!"
+        assert parsed.get("_llm_finish_reason") is None
+
+    def test_finish_reason_stop_is_captured(self):
+        """Test that finish_reason='stop' is properly captured in successful response."""
+        response = {
+            "response_type": "chat",
+            "message": "Success!"
+        }
+        mock_api_response = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": json.dumps(response)
+                    },
+                }
+            ]
+        }
+        parsed = self.llm._parse_openai_response(mock_api_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Success!"
+        assert parsed.get("_llm_finish_reason") == "stop"
     
     def test_parse_swap_view_call_response(self):
         """Test parsing a swap-related view_call response (simulating swap app usage)."""
