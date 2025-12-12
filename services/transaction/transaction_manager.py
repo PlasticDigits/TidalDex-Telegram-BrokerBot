@@ -362,7 +362,12 @@ class TransactionManager:
         """Resolve token symbols to addresses in a swap path.
         
         When the LLM returns a path with token symbols like ["CL8Y", "CZUSD"],
-        this method resolves them to their actual contract addresses.
+        this method resolves those symbols to their actual contract addresses.
+        
+        Note:
+            This method intentionally does NOT enforce swap routing rules.
+            Routing is app-specific logic (e.g., TidalDex swap can try multiple
+            intermediate routes) and is handled at the app/session layer.
         
         Args:
             path: List of token symbols or addresses

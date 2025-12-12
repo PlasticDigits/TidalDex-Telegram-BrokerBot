@@ -135,6 +135,143 @@ class LLMAppSession:
             "role": role,
             "content": content
         })
+
+    def _to_router_path_token(self, token_ref: str) -> str:
+        """Convert a token reference to a router-compatible token address.
+
+        The swap LLM app may carry native tokens as strings ("BNB"/"ETH") in the path.
+        Router methods expect address[]; for native tokens we must use WETH/WBNB.
+        """
+        if token_ref in ("BNB", "ETH"):
+            weth = os.getenv("WETH")
+            if not weth:
+                raise ValueError("WETH environment variable is required to route native token swaps")
+            return transaction_manager.web3.to_checksum_address(weth)
+
+        # token_ref should already be a checksum address (from parameter processing)
+        if transaction_manager.web3.is_address(token_ref):
+            return transaction_manager.web3.to_checksum_address(token_ref)
+
+        raise ValueError(f"Invalid token reference in path: {token_ref!r}")
+
+    @staticmethod
+    def _normalize_path(path: List[str]) -> List[str]:
+        """Normalize a path by removing consecutive duplicates."""
+        if not path:
+            return []
+        normalized: List[str] = [path[0]]
+        for item in path[1:]:
+            if item != normalized[-1]:
+                normalized.append(item)
+        return normalized
+
+    async def _select_best_swap_route(
+        self,
+        *,
+        contract_address: str,
+        abi: List[Dict[str, Any]],
+        quote_method: str,
+        amount: int,
+        token_in: str,
+        token_out: str,
+        status_callback: Optional[Any] = None,
+    ) -> tuple[List[str], Any]:
+        """Try 4 possible TidalDex routes and pick the best non-reverting one.
+
+        Supported route patterns (after resolving token symbols):
+        - token_in -> CZUSD -> token_out
+        - token_in -> CZB   -> token_out
+        - token_in -> CZUSD -> CZB -> token_out
+        - token_in -> CZB   -> CZUSD -> token_out
+
+        Selection:
+        - getAmountsOut: choose route with maximum output (last element).
+        - getAmountsIn:  choose route with minimum required input (first element).
+        """
+        if quote_method not in ("getAmountsOut", "getAmountsIn"):
+            raise ValueError(f"Unsupported quote method for route selection: {quote_method}")
+
+        if amount <= 0:
+            raise ValueError("Amount must be positive for route selection")
+
+        czusd = await transaction_manager._resolve_token_symbol("CZUSD")
+        czb = await transaction_manager._resolve_token_symbol("CZB")
+        if not czusd or not czb:
+            raise ValueError("Could not resolve CZUSD/CZB token addresses from token list")
+
+        czusd_addr = transaction_manager.web3.to_checksum_address(czusd)
+        czb_addr = transaction_manager.web3.to_checksum_address(czb)
+
+        token_in_addr = self._to_router_path_token(token_in)
+        token_out_addr = self._to_router_path_token(token_out)
+
+        raw_candidates: List[List[str]] = [
+            [token_in_addr, czusd_addr, token_out_addr],
+            [token_in_addr, czb_addr, token_out_addr],
+            [token_in_addr, czusd_addr, czb_addr, token_out_addr],
+            [token_in_addr, czb_addr, czusd_addr, token_out_addr],
+        ]
+
+        candidates: List[List[str]] = []
+        seen: set[tuple[str, ...]] = set()
+        for cand in raw_candidates:
+            normalized = self._normalize_path(cand)
+            if len(normalized) < 2:
+                continue
+            key = tuple(normalized)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(normalized)
+
+        best_path: Optional[List[str]] = None
+        best_result: Any = None
+        best_score: Optional[int] = None
+        errors: List[str] = []
+
+        for idx, cand in enumerate(candidates, start=1):
+            if status_callback:
+                await status_callback(f"Trying route {idx}/{len(candidates)}...")
+            try:
+                result = await transaction_manager.call_view_method(
+                    contract_address,
+                    abi,
+                    quote_method,
+                    [amount, cand],
+                    status_callback=None,
+                )
+                if not isinstance(result, list) or not result:
+                    raise ValueError(f"Unexpected {quote_method} result type: {type(result)}")
+
+                score = int(result[-1]) if quote_method == "getAmountsOut" else int(result[0])
+                if best_score is None:
+                    best_score = score
+                    best_path = cand
+                    best_result = result
+                else:
+                    if quote_method == "getAmountsOut" and score > best_score:
+                        best_score = score
+                        best_path = cand
+                        best_result = result
+                    if quote_method == "getAmountsIn" and score < best_score:
+                        best_score = score
+                        best_path = cand
+                        best_result = result
+            except Exception as e:
+                errors.append(f"route={cand}: {e}")
+
+        if best_path is None:
+            err_preview = "; ".join(errors[:4]) + (" ..." if len(errors) > 4 else "")
+            raise ValueError(f"All swap routes failed for {quote_method}. Errors: {err_preview}")
+
+        logger.info(
+            "Selected best swap route for %s user=%s path=%s score=%s",
+            quote_method,
+            hash_user_id(self.user_id),
+            best_path,
+            best_score,
+        )
+        return best_path, best_result
     
     async def handle_view_call(
         self,
@@ -175,16 +312,46 @@ class LLMAppSession:
                 method_config, parameters, self.llm_app_config
             )
             
-            # Prepare arguments in correct order
+            # TidalDex swap routing: probe multiple routes and pick best
+            if (
+                self.llm_app_name == "swap"
+                and method_name in ("getAmountsOut", "getAmountsIn")
+                and isinstance(processed_params.get("path"), list)
+                and len(processed_params["path"]) >= 2
+            ):
+                amount_key = "amountIn" if method_name == "getAmountsOut" else "amountOut"
+                amount_val = processed_params.get(amount_key)
+                if amount_val is None:
+                    raise ValueError(f"Missing required parameter '{amount_key}' for {method_name}")
+
+                token_in = processed_params["path"][0]
+                token_out = processed_params["path"][-1]
+                best_path, best_result = await self._select_best_swap_route(
+                    contract_address=contract_address,
+                    abi=abi,
+                    quote_method=method_name,
+                    amount=int(amount_val),
+                    token_in=str(token_in),
+                    token_out=str(token_out),
+                    status_callback=status_callback,
+                )
+                logger.info(
+                    "Using routed path for %s user=%s original=%s selected=%s",
+                    method_name,
+                    hash_user_id(self.user_id),
+                    processed_params.get("path"),
+                    best_path,
+                )
+                return best_result
+
+            # Generic path: Prepare arguments in correct order and execute
             args = [processed_params.get(param) for param in method_config["inputs"]]
-            
-            # Execute the call
             result = await transaction_manager.call_view_method(
                 contract_address,
                 abi,
                 method_name,
                 args,
-                status_callback
+                status_callback,
             )
             
             logger.info(f"View call {method_name} executed successfully for user {hash_user_id(self.user_id)}")
@@ -224,6 +391,41 @@ class LLMAppSession:
             
             # Use processed_params from preview (already has defaults resolved)
             processed_params = preview["processed_params"]
+
+            # For swap write calls, select a viable/best routed path before confirmation.
+            if (
+                self.llm_app_name == "swap"
+                and isinstance(processed_params.get("path"), list)
+                and len(processed_params["path"]) >= 2
+                and "path" in method_config.get("inputs", [])
+            ):
+                # Load router ABI/address for quote calls
+                contract_name = method_config.get("contract", list(self.llm_app_config["contracts"].keys())[0])
+                contract_config = self.llm_app_config["contracts"][contract_name]
+                contract_address = os.getenv(contract_config["address_env_var"])
+                if not contract_address:
+                    raise ValueError(f"Contract address not found: {contract_config['address_env_var']}")
+                abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
+                abi = self._load_abi(abi_path)
+
+                amount_for_quote = processed_params.get("amountIn")
+                if amount_for_quote is None:
+                    amount_for_quote = processed_params.get("value_wei")
+
+                if amount_for_quote is not None and int(amount_for_quote) > 0:
+                    token_in = processed_params["path"][0]
+                    token_out = processed_params["path"][-1]
+                    best_path, _best_amounts = await self._select_best_swap_route(
+                        contract_address=contract_address,
+                        abi=abi,
+                        quote_method="getAmountsOut",
+                        amount=int(amount_for_quote),
+                        token_in=str(token_in),
+                        token_out=str(token_out),
+                        status_callback=None,
+                    )
+                    processed_params["path"] = best_path
+                    preview["processed_params"] = processed_params
             
             # Store pending transaction
             self.pending_transaction = PendingTransaction(
