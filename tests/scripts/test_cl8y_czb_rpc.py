@@ -46,7 +46,7 @@ ROUTER_ABI = [
 ]
 
 
-def test_route(amount_in: int, path: List[str]) -> Tuple[bool, Optional[List[int]], Optional[str]]:
+def try_route(amount_in: int, path: List[str]) -> Tuple[bool, Optional[List[int]], Optional[str]]:
     """Test a swap route via getAmountsOut.
     
     Returns:
@@ -117,7 +117,7 @@ def main():
         
         for path in routes:
             path_desc = get_path_description(path)
-            success, amounts, error = test_route(amount, path)
+            success, amounts, error = try_route(amount, path)
             
             if success:
                 out_amount = amounts[-1]

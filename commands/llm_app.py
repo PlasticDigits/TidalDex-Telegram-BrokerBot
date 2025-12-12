@@ -15,6 +15,7 @@ from app.base.llm_interface import get_llm_interface
 from app.base.llm_app_session import SessionState, LLMAppSession
 from utils.status_updates import create_status_callback
 from utils.config import BSC_SCANNER_URL
+from utils.swap_intent import is_swap_intent, parse_slippage_bps
 from db.utils import hash_user_id
 
 logger = logging.getLogger(__name__)
@@ -364,7 +365,82 @@ async def handle_view_call(update: Update, context: ContextTypes.DEFAULT_TYPE, s
             f"✅ {response['message']}\n\n"
             f"**Result:**\n{formatted_result}"
         )
-        
+
+        # Swap UX improvement:
+        # If the user clearly asked to *swap* (not just price-check), then after quoting
+        # we automatically prepare the transaction preview and show the inline confirm
+        # keyboard. This removes the need for the user to say "Proceed" multiple times.
+        if (
+            session.llm_app_name == "swap"
+            and contract_call.get("method") == "getAmountsOut"
+            and session.last_swap_quote
+        ):
+            # Find the last user message (LLMInterface appends it to session history)
+            last_user_msg = ""
+            for msg in reversed(session.conversation_history):
+                if msg.get("role") == "user":
+                    last_user_msg = str(msg.get("content") or "")
+                    break
+
+            if is_swap_intent(last_user_msg):
+                slippage_bps = parse_slippage_bps(last_user_msg) or 100  # default 1%
+
+                quote_amount_out = int(session.last_swap_quote["amount_out_raw"])
+                quote_amount_in = int(session.last_swap_quote["amount_in_raw"])
+                quote_path = list(session.last_swap_quote["path"])
+
+                # For native token swaps (BNB/ETH placeholders), skip auto-prepare for now.
+                # Those require picking a different write method and/or wrapping logic.
+                if any(tok in ("BNB", "ETH") for tok in (quote_path[0], quote_path[-1])):
+                    return CONVERSING
+
+                amount_out_min = (quote_amount_out * (10000 - slippage_bps)) // 10000
+
+                preparing_msg = await update.message.reply_text(
+                    f"⏳ Preparing transaction preview (slippage {slippage_bps / 100:.2f}%)..."
+                )
+
+                # Prefer fee-on-transfer-safe method when available.
+                preferred_methods = [
+                    "swapExactTokensForTokensSupportingFeeOnTransferTokens",
+                    "swapExactTokensForTokens",
+                ]
+                prepared = False
+                last_err: Optional[Exception] = None
+                for method in preferred_methods:
+                    try:
+                        await session.prepare_write_call(
+                            method,
+                            {
+                                "amountIn": quote_amount_in,
+                                "amountOutMin": amount_out_min,
+                                "path": quote_path,
+                            },
+                        )
+                        prepared = True
+                        break
+                    except Exception as e:
+                        last_err = e
+                        continue
+
+                if not prepared:
+                    if last_err:
+                        logger.error(f"Auto-prepare swap preview failed: {str(last_err)}")
+                    return CONVERSING
+
+                if context.user_data is None:
+                    context.user_data = {}
+                context.user_data["llm_app_session"] = session
+
+                confirmation_msg = await session.format_confirmation_message()
+                keyboard = session.get_confirmation_keyboard()
+                await preparing_msg.edit_text(
+                    confirmation_msg,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown",
+                )
+                return CONFIRMING_TRANSACTION
+
         return CONVERSING
         
     except Exception as e:

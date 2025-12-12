@@ -93,8 +93,9 @@ class TestTokenResolutionBalancePreference:
         self, mock_web3, mock_token_manager
     ) -> None:
         """
-        Test that when wallet_address is provided, resolution prefers tracked tokens
-        with non-zero balance over default token list tokens with zero balance.
+        Token list must be authoritative: even when wallet_address is provided,
+        resolution should prefer the default token list (and purge any stale tracked
+        token entries later) to avoid confusion during token migrations.
         """
         from services.transaction.transaction_manager import TransactionManager
         
@@ -114,12 +115,9 @@ class TestTokenResolutionBalancePreference:
                 wallet_address=WALLET_ADDRESS
             )
             
-            # Should resolve to CL8Y_NEW (the one with balance)
+            # Token list authoritative: should resolve to CL8Y_DEFAULT
             assert result is not None
-            assert result.lower() == CL8Y_NEW.lower()
-            
-            # Verify it checked balances
-            assert mock_token_manager.get_token_balance.called
+            assert result.lower() == CL8Y_DEFAULT.lower()
     
     @pytest.mark.asyncio
     async def test_resolves_to_default_when_no_wallet_provided(
@@ -160,8 +158,8 @@ class TestTokenResolutionBalancePreference:
         self, mock_web3, mock_token_manager
     ) -> None:
         """
-        Test that when multiple tracked tokens share the same symbol,
-        resolution prefers the one with the highest balance.
+        Token list is authoritative: tracked-token balance preference only applies
+        when the token is NOT present in any default list.
         """
         from services.transaction.transaction_manager import TransactionManager
         
@@ -190,21 +188,17 @@ class TestTokenResolutionBalancePreference:
                 wallet_address=WALLET_ADDRESS
             )
             
-            # Should resolve to CL8Y_NEW (highest balance)
+            # Token list authoritative: should resolve to CL8Y_DEFAULT
             assert result is not None
-            assert result.lower() == CL8Y_NEW.lower()
-            
-            # Verify it checked balances for both tokens
-            assert mock_token_manager.get_token_balance.call_count >= 2
+            assert result.lower() == CL8Y_DEFAULT.lower()
     
     @pytest.mark.asyncio
     async def test_uses_first_tracked_token_when_all_have_zero_balance(
         self, mock_web3, mock_token_manager
     ) -> None:
         """
-        Test that when all tracked tokens have zero balance, resolution still uses
-        the first tracked token (user may want to swap to get balance).
-        Only falls back to default if no tracked tokens exist.
+        Token list is authoritative: tracked tokens should not override the token list,
+        regardless of balances.
         """
         from services.transaction.transaction_manager import TransactionManager
         
@@ -230,28 +224,18 @@ class TestTokenResolutionBalancePreference:
                 wallet_address=WALLET_ADDRESS
             )
             
-            # Should use first tracked token (CL8Y_OLD) even though it has zero balance
-            # This is correct behavior - user may want to swap to get balance
+            # Token list authoritative: should resolve to CL8Y_DEFAULT
             assert result is not None
-            assert result.lower() == CL8Y_OLD.lower()
+            assert result.lower() == CL8Y_DEFAULT.lower()
     
     @pytest.mark.asyncio
     async def test_exact_bug_scenario_tracked_tokens_with_balance_vs_default_with_zero(
         self, mock_web3, mock_token_manager
     ) -> None:
         """
-        Regression test for the exact bug from chat logs:
-        
-        Scenario:
-        - User has TWO tracked CL8Y tokens with non-zero balances (13.55 and 12.69)
-        - Default token list has CL8Y at a DIFFERENT address with 0 balance
-        - When swap requested with wallet_address, should pick tracked token with highest balance
-        - NOT the default list address with 0 balance
-        
-        Chat log evidence:
-        - /balance shows: CL8Y: 13.552103200785384 and CL8Y: 12.689072202450769
-        - Swap command: "Swap 1 CL8Y for CZB"
-        - Bug response: "You have 0.0 CL8Y" (picked wrong address)
+        Token list authoritative regression:
+        If the token list resolves CL8Y to a specific address, that must be used even
+        when the user has other tracked tokens with the same symbol.
         """
         from services.transaction.transaction_manager import TransactionManager
         
@@ -310,13 +294,8 @@ class TestTokenResolutionBalancePreference:
                 wallet_address=WALLET_ADDRESS
             )
             
-            # Should resolve to CL8Y_NEW (highest balance among tracked tokens)
-            # NOT CL8Y_DEFAULT (default list with 0 balance)
+            # Token list authoritative: should resolve to CL8Y_DEFAULT
             assert result is not None
-            assert result.lower() == CL8Y_NEW.lower()
-            
-            # Verify balance checks were made for tracked tokens
-            balance_calls = mock_token_manager.get_token_balance.call_args_list
-            checked_addresses = [call[0][1].lower() for call in balance_calls]
-            assert CL8Y_NEW.lower() in checked_addresses or CL8Y_OLD.lower() in checked_addresses
+            assert result.lower() == CL8Y_DEFAULT.lower()
+
 

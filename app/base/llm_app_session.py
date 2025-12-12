@@ -60,6 +60,8 @@ class LLMAppSession:
         self.tracked_tokens: List[Dict[str, Any]] = []
         self.token_balances: Dict[str, Any] = {}
         self._last_context_refresh_ts: float = 0.0
+        # Last successful swap quote details (used to auto-prepare a confirmation after quoting)
+        self.last_swap_quote: Optional[Dict[str, Any]] = None
         
     async def initialize_context(self) -> bool:
         """Initialize session context with user's wallet and token information.
@@ -438,6 +440,18 @@ class LLMAppSession:
                     processed_params.get("path"),
                     best_path,
                 )
+
+                # Cache quote for smoother UX (auto-prepare write call after quoting).
+                if method_name == "getAmountsOut" and isinstance(best_result, list) and len(best_result) >= 2:
+                    try:
+                        self.last_swap_quote = {
+                            "amount_in_raw": int(best_result[0]),
+                            "amount_out_raw": int(best_result[-1]),
+                            "path": best_path,
+                        }
+                    except Exception:
+                        self.last_swap_quote = None
+
                 return best_result
 
             # Generic path: Prepare arguments in correct order and execute
@@ -449,6 +463,24 @@ class LLMAppSession:
                 args,
                 status_callback,
             )
+
+            # Cache non-routed getAmountsOut quotes as well (path already resolved by process_parameters)
+            if (
+                self.llm_app_name == "swap"
+                and method_name == "getAmountsOut"
+                and isinstance(result, list)
+                and len(result) >= 2
+                and isinstance(processed_params.get("path"), list)
+                and len(processed_params["path"]) >= 2
+            ):
+                try:
+                    self.last_swap_quote = {
+                        "amount_in_raw": int(result[0]),
+                        "amount_out_raw": int(result[-1]),
+                        "path": list(processed_params["path"]),
+                    }
+                except Exception:
+                    self.last_swap_quote = None
             
             logger.info(f"View call {method_name} executed successfully for user {hash_user_id(self.user_id)}")
             return result

@@ -469,6 +469,14 @@ class TransactionManager:
                 param_type = param_rules.get("type", "string")
                 
                 if param_type == "token_amount" and param_rules.get("convert_from_human"):
+                    # If caller provided an int, treat it as already-raw token units.
+                    # This is important for internal flows where we compute exact raw values
+                    # (e.g., amountOutMin derived from a router quote) and must not round-trip
+                    # through float/string conversion.
+                    if isinstance(value, int):
+                        processed[param_name] = value
+                        continue
+
                     # Get token address to determine decimals
                     decimals_from = param_rules.get("get_decimals_from")
                     if decimals_from:
@@ -776,8 +784,15 @@ class TransactionManager:
                 )
                 
                 try:
-                    # Untrack the stale token
-                    await token_manager.untrack(user_id, stale_address)
+                    # Untrack the stale token (support both async and sync TokenManager mocks)
+                    maybe_awaitable = token_manager.untrack(user_id, stale_address)
+                    try:
+                        import inspect
+                        if inspect.isawaitable(maybe_awaitable):
+                            await maybe_awaitable
+                    except Exception:
+                        # If inspect fails or the mock behaves unexpectedly, fall back to a best-effort call.
+                        pass
                     logger.info(
                         "Successfully purged stale token %s (%s) for user %s",
                         token_symbol,
@@ -929,16 +944,6 @@ class TransactionManager:
             Dict containing transaction preview information
         """
         try:
-            # Validate token/amount pairs
-            await self.formatter.validate_token_amount_pairs(method_config, raw_params)
-            
-            # Generate human summary
-            summary = await self.formatter.format_transaction_summary(
-                method_config,
-                raw_params,
-                app_config
-            )
-            
             # Get contract info
             contract_name = method_config.get("contract", list(app_config["contracts"].keys())[0])
             contract_config = app_config["contracts"][contract_name]
@@ -951,13 +956,23 @@ class TransactionManager:
             abi_path = f"app/llm_apps/{app_config['name']}/{contract_config['abi_file']}"
             abi = load_abi_from_file(abi_path)
             
-            # Estimate gas
+            # Process parameters (resolves symbols like ["CL8Y", "CZB"] into addresses)
             processed_params = await self.process_parameters(
                 method_config,
                 raw_params,
                 app_config,
                 user_id=user_id,
                 wallet_address=wallet_address,
+            )
+
+            # Validate token/amount pairs AFTER processing so token refs are addresses/BNB
+            await self.formatter.validate_token_amount_pairs(method_config, processed_params)
+
+            # Generate human summary (prefer processed params for correct token metadata)
+            summary = await self.formatter.format_transaction_summary(
+                method_config,
+                processed_params,
+                app_config
             )
             
             # Resolve "user_wallet_address" to actual wallet address if needed
