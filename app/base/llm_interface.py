@@ -5,10 +5,15 @@ Handles conversation context, function calling, and response parsing.
 import logging
 import json
 import os
+import re
 from typing import Dict, List, Any, Optional
 import httpx
+from dotenv import load_dotenv
 from app.base.llm_app_session import LLMAppSession
 from app.base.llm_app_manager import llm_app_manager
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +309,63 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                 response.raise_for_status()
             
             return response.json()
+
+    def _extract_json_text(self, raw_text: str) -> str:
+        """Best-effort extraction of a JSON object from model output text.
+
+        The OpenAI API is asked to return strict JSON, but in practice models may:
+        - Wrap JSON in Markdown fences (```json ... ```)
+        - Add leading/trailing commentary
+        This helper tries to recover a parseable JSON object string.
+        """
+        text = raw_text.strip()
+        if not text:
+            return text
+
+        # Prefer extracting from fenced blocks first.
+        fenced = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, flags=re.IGNORECASE)
+        if fenced:
+            return fenced.group(1).strip()
+
+        # Fall back to slicing the outer-most JSON object.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return text[start : end + 1].strip()
+
+        return text
+
+    def _coerce_openai_content_to_text(self, content: Any) -> Optional[str]:
+        """Convert OpenAI 'message.content' into a plain text string when possible."""
+        if content is None:
+            return None
+        if isinstance(content, str):
+            return content
+
+        # Some clients / versions may represent message content as a list of parts.
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    # Common shapes: {"type":"text","text":"..."}, {"type":"output_text","text":"..."}
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                        continue
+                    # Fallback keys seen in some SDKs
+                    alt = item.get("content")
+                    if isinstance(alt, str):
+                        parts.append(alt)
+                        continue
+            if parts:
+                return "".join(parts)
+            return None
+
+        # Unknown/unsupported type
+        return None
     
     def _parse_openai_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse OpenAI API response.
@@ -315,11 +377,62 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             Parsed response dict
         """
         try:
-            # Extract the assistant's message
-            content = response["choices"][0]["message"]["content"]
+            # Extract the first choice/message (best-effort; be defensive about shape)
+            choices = response.get("choices")
+            if not isinstance(choices, list) or not choices:
+                raise ValueError("OpenAI response missing non-empty 'choices' array")
+
+            choice0 = choices[0] if isinstance(choices[0], dict) else {}
+            finish_reason = choice0.get("finish_reason")
+            message = choice0.get("message") if isinstance(choice0.get("message"), dict) else {}
+
+            raw_content = message.get("content")
+            content_text = self._coerce_openai_content_to_text(raw_content)
+            refusal_text = message.get("refusal") if isinstance(message.get("refusal"), str) else None
+
+            # Handle refusals/content filters/empty responses explicitly.
+            if content_text is None or content_text.strip() == "":
+                if refusal_text:
+                    logger.warning(
+                        "OpenAI returned a refusal (finish_reason=%s).",
+                        finish_reason,
+                    )
+                    return {
+                        "response_type": "chat",
+                        "message": refusal_text,
+                        "error": "refusal",
+                    }
+
+                if finish_reason == "content_filter":
+                    logger.warning("OpenAI response was blocked by content_filter.")
+                    return {
+                        "response_type": "chat",
+                        "message": (
+                            "The AI service could not return a response due to content filtering. "
+                            "Please try rephrasing your request."
+                        ),
+                        "error": "content_filter",
+                    }
+
+                logger.error(
+                    "OpenAI returned empty message content (finish_reason=%s, message_keys=%s).",
+                    finish_reason,
+                    sorted(list(message.keys())),
+                )
+                return {
+                    "response_type": "chat",
+                    "message": (
+                        "The AI service returned an empty response. Please try again. "
+                        "If this keeps happening, the service may be refusing or failing upstream."
+                    ),
+                    "error": "empty_llm_response",
+                }
+
+            # Normalize to JSON text (strip fences / leading text if any)
+            json_text = self._extract_json_text(content_text)
             
             # Parse JSON response
-            parsed = json.loads(content)
+            parsed = json.loads(json_text)
             
             # Validate required fields
             if "response_type" not in parsed:
@@ -347,11 +460,18 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from LLM response: {str(e)}")
-            logger.error(f"Raw response content: {content}")
+            try:
+                raw = response.get("choices", [{}])[0].get("message", {}).get("content")  # type: ignore[union-attr]
+            except Exception:
+                raw = None
+            logger.error(f"Raw response content: {raw}")
             return {
                 "response_type": "chat",
-                "message": "I had trouble processing that request. Could you please rephrase it?",
-                "error": "JSON parse error"
+                "message": (
+                    "I couldn't parse the AI response as valid JSON. "
+                    "Please try rephrasing your request."
+                ),
+                "error": "json_parse_error",
             }
         except Exception as e:
             logger.error(f"Failed to parse OpenAI response: {str(e)}")

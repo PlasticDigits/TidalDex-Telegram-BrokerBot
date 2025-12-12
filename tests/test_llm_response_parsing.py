@@ -261,7 +261,7 @@ class TestLLMResponseParsing:
         # Should return error response
         assert parsed["response_type"] == "chat"
         assert "error" in parsed
-        assert "JSON parse error" in parsed.get("error", "")
+        assert "parse" in str(parsed.get("error", "")).lower()
     
     def test_parse_swap_view_call_response(self):
         """Test parsing a swap-related view_call response (simulating swap app usage)."""

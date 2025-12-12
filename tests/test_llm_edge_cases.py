@@ -373,6 +373,7 @@ class TestLLMEdgeCases:
         """Test handling of OpenAI refusal responses (content moderation)."""
         mock_response = {
             "choices": [{
+                "finish_reason": "stop",
                 "message": {
                     "content": None,
                     "refusal": "I cannot assist with this request."
@@ -380,9 +381,76 @@ class TestLLMEdgeCases:
             }]
         }
         parsed = self.llm._parse_openai_response(mock_response)
-        # Should return an error response when content is None
+        # Should surface refusal text to the user
         assert parsed["response_type"] == "chat"
         assert "error" in parsed
+        assert parsed["error"] == "refusal"
+        assert parsed["message"] == "I cannot assist with this request."
+
+    def test_parse_empty_content_string_returns_actionable_error(self):
+        """Test handling when OpenAI returns an empty content string."""
+        mock_response = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "content": ""
+                }
+            }]
+        }
+        parsed = self.llm._parse_openai_response(mock_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed.get("error") == "empty_llm_response"
+        assert "empty" in parsed.get("message", "").lower()
+
+    def test_parse_content_filter_empty_content(self):
+        """Test handling when OpenAI blocks output via content_filter."""
+        mock_response = {
+            "choices": [{
+                "finish_reason": "content_filter",
+                "message": {
+                    "content": ""
+                }
+            }]
+        }
+        parsed = self.llm._parse_openai_response(mock_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed.get("error") == "content_filter"
+
+    def test_parse_markdown_fenced_json_content(self):
+        """Test parsing JSON wrapped in Markdown code fences."""
+        content = """```json
+{
+  "response_type": "chat",
+  "message": "Hello from fenced JSON"
+}
+```"""
+        mock_response = {
+            "choices": [{
+                "message": {
+                    "content": content
+                }
+            }]
+        }
+        parsed = self.llm._parse_openai_response(mock_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Hello from fenced JSON"
+
+    def test_parse_list_based_message_content(self):
+        """Test parsing when message.content is a list of parts."""
+        # Some SDKs represent content as an array of parts; ensure we can recover the JSON string.
+        parts = [
+            {"type": "output_text", "text": '{"response_type":"chat","message":"Hello from parts"}'}
+        ]
+        mock_response = {
+            "choices": [{
+                "message": {
+                    "content": parts
+                }
+            }]
+        }
+        parsed = self.llm._parse_openai_response(mock_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Hello from parts"
     
     def test_parse_numeric_values_in_message(self):
         """Test handling of large numeric values in response."""

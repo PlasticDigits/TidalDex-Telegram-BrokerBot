@@ -10,7 +10,8 @@ import asyncio
 from services.pin.pin_decorators import conversation_pin_helper
 from services.wallet import wallet_manager
 from services.pin import pin_manager
-from app.base import llm_app_manager, llm_interface
+from app.base import llm_app_manager
+from app.base.llm_interface import get_llm_interface
 from app.base.llm_app_session import SessionState, LLMAppSession
 from utils.status_updates import create_status_callback
 from utils.config import BSC_SCANNER_URL
@@ -246,7 +247,8 @@ async def handle_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Show typing indicator
         await update.message.chat.send_action("typing")
         
-        # Process message with LLM
+        # Process message with LLM (use get_llm_interface to handle missing API key gracefully)
+        llm_interface = get_llm_interface()
         response = await llm_interface.process_user_message(session, user_message)
         
         if response["response_type"] == "chat":
