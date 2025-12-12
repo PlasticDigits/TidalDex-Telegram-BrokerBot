@@ -211,7 +211,56 @@ class TransactionManager:
             return result
             
         except ContractLogicError as e:
-            error_msg = f"Contract logic error in {method_name}: {str(e)}"
+            # Extract readable error message from ContractLogicError
+            # ContractLogicError stores error as tuple: (message, data)
+            # The message may contain hex-encoded error data that we want to remove
+            readable_error = None
+            
+            # Try to get message from e.args[0] (first element is the message string)
+            if hasattr(e, 'args') and e.args and len(e.args) > 0:
+                error_message = str(e.args[0])
+                
+                # Extract readable part - remove hex-encoded error data
+                if "execution reverted:" in error_message:
+                    # Find the start of "execution reverted:"
+                    revert_start = error_message.find("execution reverted:")
+                    # Extract everything after "execution reverted:"
+                    after_revert = error_message[revert_start + len("execution reverted:"):].strip()
+                    
+                    # Remove hex-encoded error data (long hex strings starting with 0x)
+                    # The hex data appears after a colon or space
+                    # Look for patterns like ": 0x..." or " 0x..." where hex is >50 chars
+                    parts = after_revert.split()
+                    readable_parts = []
+                    for part in parts:
+                        # Check if this part is a long hex string (error data encoding)
+                        if part.startswith("0x") and len(part) > 50:
+                            break  # Stop at first long hex string
+                        # Also check if part contains ":0x" (colon followed by hex)
+                        if ":0x" in part:
+                            # Split at colon and take only the part before hex
+                            colon_idx = part.find(":0x")
+                            if colon_idx > 0:
+                                readable_parts.append(part[:colon_idx])
+                            break
+                        readable_parts.append(part)
+                    
+                    readable_error = f"execution reverted: {' '.join(readable_parts).strip()}"
+                else:
+                    # No "execution reverted:" prefix, just truncate if too long
+                    readable_error = error_message[:500] if len(error_message) > 500 else error_message
+            
+            # Fallback: try e.message attribute
+            if not readable_error and hasattr(e, 'message') and e.message:
+                msg_str = str(e.message)
+                readable_error = msg_str[:500] if len(msg_str) > 500 else msg_str
+            
+            # Final fallback: use string representation but truncate
+            if not readable_error:
+                error_str = str(e)
+                readable_error = error_str[:500] if len(error_str) > 500 else error_str
+            
+            error_msg = f"Contract logic error in {method_name}: {readable_error}"
             logger.error(error_msg)
             if status_callback:
                 await status_callback(f"Error: {error_msg}")
@@ -576,19 +625,18 @@ class TransactionManager:
     ) -> Optional[str]:
         """Resolve a token reference (symbol or name) to its contract address.
         
-        Prioritizes tokens with non-zero balances when wallet_address is provided.
-        Falls back to default token list if no tracked tokens have balance.
+        The default token list is authoritative. Tracked tokens are only used
+        when the token is not in the default list.
 
         Resolution priority:
-        1. If wallet_address provided: Check tracked tokens first, prefer highest balance
-        2. Default token list (authoritative for tokens not in wallet) by symbol
-        3. TokenManager default_tokens by symbol OR name
-        3. Tracked tokens (fallback if not in default list)
+        1. Default token list (authoritative - prevents using stale/migrated tokens)
+        2. TokenManager default_tokens by symbol OR name
+        3. Tracked tokens (fallback only if not in any default list)
         
         Args:
             symbol: Token reference to resolve (symbol or name; e.g., "CL8Y", "CZUSD", "CeramicLiberty.com")
-            user_id: Optional user ID for context-aware resolution (checks tracked tokens first)
-            wallet_address: Optional wallet address used for disambiguating tokens by balance
+            user_id: Optional user ID for context-aware resolution (checks tracked tokens as fallback)
+            wallet_address: Optional wallet address (currently unused, kept for API compatibility)
             
         Returns:
             Optional[str]: Token checksum address if found, None otherwise
@@ -599,75 +647,20 @@ class TransactionManager:
             
             token_ref_clean = self._canonicalize_token_ref(symbol)
             
-            # If wallet_address is provided, prioritize tokens with non-zero balance
-            if wallet_address and user_id:
-                try:
-                    tracked_tokens = await token_manager.get_tracked_tokens(user_id)
-                    matching_tracked = [
-                        token for token in tracked_tokens
-                        if self._token_details_match_ref(token_ref_clean, token)
-                    ]
-
-                    if matching_tracked:
-                        # Check balances for all matching tokens
-                        balances_with_tokens = []
-                        for token in matching_tracked:
-                            try:
-                                balance = await token_manager.get_token_balance(
-                                    wallet_address,
-                                    token['token_address'],
-                                )
-                                balances_with_tokens.append((balance, token))
-                            except Exception:
-                                balances_with_tokens.append((0, token))
-
-                        # Sort by balance (highest first)
-                        balances_with_tokens.sort(key=lambda x: x[0], reverse=True)
-                        
-                        # Prefer token with non-zero balance
-                        for balance, token in balances_with_tokens:
-                            if balance > 0:
-                                logger.info(
-                                    f"Resolved '{symbol}' to tracked token with balance: "
-                                    f"{token['token_address']} (balance: {balance})"
-                                )
-                                return self.web3.to_checksum_address(token['token_address'])
-                        
-                        # If all have zero balance, use first one (or highest if multiple)
-                        if balances_with_tokens:
-                            best_token = balances_with_tokens[0][1]
-                            logger.debug(
-                                f"Resolved '{symbol}' to tracked token (zero balance): "
-                                f"{best_token['token_address']}"
-                            )
-                            return self.web3.to_checksum_address(best_token['token_address'])
-                except Exception as e:
-                    logger.warning(f"Failed to check tracked tokens for symbol '{symbol}': {str(e)}")
-            
-            # 1) Default token list is authoritative (if no wallet context or no balance found)
+            # 1) Default token list is authoritative - always check first
+            # This prevents using stale/migrated token addresses from tracked tokens
             token_info = await find_token(symbol=token_ref_clean)
             if token_info and token_info.get('address'):
                 address = self.web3.to_checksum_address(token_info['address'])
                 
-                # If wallet_address provided, verify balance before returning
-                if wallet_address:
-                    try:
-                        balance = await token_manager.get_token_balance(wallet_address, address)
-                        if balance > 0:
-                            logger.debug(f"Resolved '{symbol}' to default token list with balance: {address}")
-                            return address
-                        else:
-                            logger.debug(
-                                f"Default token list '{symbol}' has zero balance, "
-                                f"will check tracked tokens as fallback"
-                            )
-                    except Exception:
-                        # If balance check fails, still return default address
-                        logger.debug(f"Resolved '{symbol}' to default token list: {address}")
-                        return address
-                else:
-                    logger.debug(f"Resolved '{symbol}' to default token list: {address}")
-                    return address
+                # Auto-purge any stale tracked tokens with same symbol but different address
+                if user_id:
+                    await self._purge_stale_tracked_tokens(
+                        user_id, token_ref_clean, address, token_manager
+                    )
+                
+                logger.debug(f"Resolved '{symbol}' to default token list: {address}")
+                return address
             
             # 2) Try TokenManager's parsed default list
             if not token_manager.default_tokens:
@@ -680,32 +673,24 @@ class TransactionManager:
                     matching_default_addrs.append(str(address))
 
             if matching_default_addrs:
-                # If wallet_address provided, prefer the one with non-zero/highest balance.
-                if wallet_address:
-                    balances: List[tuple[int, str]] = []
-                    for addr in matching_default_addrs:
-                        try:
-                            bal = await token_manager.get_token_balance(wallet_address, addr)
-                        except Exception:
-                            bal = 0
-                        balances.append((int(bal), addr))
-                    balances.sort(key=lambda x: x[0], reverse=True)
-                    best_balance, best_addr = balances[0]
-                    if best_balance > 0:
-                        logger.debug(f"Resolved '{symbol}' to default_tokens with balance: {best_addr}")
-                    else:
-                        logger.debug(f"Resolved '{symbol}' to default_tokens (zero balance): {best_addr}")
-                    return self.web3.to_checksum_address(best_addr)
-
                 if len(matching_default_addrs) > 1:
                     logger.warning(
                         "Token reference '%s' matched multiple default tokens (%d); selecting first.",
                         symbol,
                         len(matching_default_addrs),
                     )
-                return self.web3.to_checksum_address(matching_default_addrs[0])
+                address = self.web3.to_checksum_address(matching_default_addrs[0])
+                
+                # Auto-purge any stale tracked tokens with same symbol but different address
+                if user_id:
+                    await self._purge_stale_tracked_tokens(
+                        user_id, token_ref_clean, address, token_manager
+                    )
+                
+                logger.debug(f"Resolved '{symbol}' to default_tokens: {address}")
+                return address
 
-            # 3) Fallback: use user's tracked tokens (if any)
+            # 3) Fallback: use user's tracked tokens (only if not in any default list)
             if user_id:
                 try:
                     tracked_tokens = await token_manager.get_tracked_tokens(user_id)
@@ -749,6 +734,67 @@ class TransactionManager:
         except Exception as e:
             logger.error(f"Failed to resolve token symbol '{symbol}': {str(e)}")
             return None
+
+    async def _purge_stale_tracked_tokens(
+        self,
+        user_id: str,
+        token_ref_clean: str,
+        authoritative_address: str,
+        token_manager: Any,
+    ) -> None:
+        """Auto-purge stale tracked tokens when default list has a different address.
+        
+        When a token migrates to a new contract (e.g., CL8Y), users may still have
+        the old address tracked. This method automatically removes those stale entries
+        to prevent using outdated contract addresses.
+        
+        Args:
+            user_id: User ID to check tracked tokens for
+            token_ref_clean: Canonicalized token reference (symbol/name)
+            authoritative_address: The correct address from default token list
+            token_manager: TokenManager instance
+        """
+        try:
+            tracked_tokens = await token_manager.get_tracked_tokens(user_id)
+            conflicting_tokens = [
+                token for token in tracked_tokens
+                if self._token_details_match_ref(token_ref_clean, token)
+                and self.web3.to_checksum_address(token['token_address']) != authoritative_address
+            ]
+            
+            for token in conflicting_tokens:
+                stale_address = token['token_address']
+                token_symbol = token.get('symbol', token_ref_clean)
+                
+                logger.info(
+                    "Auto-purging stale tracked token '%s' at %s for user %s "
+                    "(migrated to %s)",
+                    token_symbol,
+                    stale_address,
+                    user_id[:16] + "..." if len(user_id) > 16 else user_id,
+                    authoritative_address,
+                )
+                
+                try:
+                    # Untrack the stale token
+                    await token_manager.untrack(user_id, stale_address)
+                    logger.info(
+                        "Successfully purged stale token %s (%s) for user %s",
+                        token_symbol,
+                        stale_address,
+                        user_id[:16] + "..." if len(user_id) > 16 else user_id,
+                    )
+                except Exception as untrack_error:
+                    logger.warning(
+                        "Failed to purge stale token %s (%s) for user %s: %s",
+                        token_symbol,
+                        stale_address,
+                        user_id[:16] + "..." if len(user_id) > 16 else user_id,
+                        str(untrack_error),
+                    )
+        except Exception as e:
+            # Don't fail resolution if purge check fails
+            logger.debug(f"Could not check for stale tracked tokens: {e}")
     
     async def _ensure_token_approval(
         self,

@@ -328,7 +328,12 @@ class LLMAppSession:
                         best_path = cand
                         best_result = result
             except Exception as e:
-                error_msg = str(e)
+                # Extract error message - use exception message if available, otherwise str(e)
+                if hasattr(e, 'args') and e.args:
+                    error_msg = str(e.args[0]) if len(e.args) == 1 else str(e)
+                else:
+                    error_msg = str(e)
+                
                 # Log route attempt for debugging
                 logger.debug(
                     "Route %d/%d failed: %s -> %s: %s",
@@ -338,7 +343,7 @@ class LLMAppSession:
                     cand[-1][:10] + "..." if len(cand) > 0 else "?",
                     error_msg[:100]  # Truncate long error messages
                 )
-                errors.append(f"route={cand}: {e}")
+                errors.append(f"route={cand}: {error_msg}")
 
         if best_path is None:
             err_preview = "; ".join(errors[:4]) + (" ..." if len(errors) > 4 else "")
