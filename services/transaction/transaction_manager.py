@@ -7,7 +7,8 @@ import json
 import os
 import re
 import time
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Iterable, Tuple
+import difflib
 from web3.exceptions import ContractLogicError
 from wallet.send import send_contract_call
 from utils.web3_connection import w3
@@ -28,6 +29,149 @@ class TransactionManager:
         self.web3 = w3
         self.formatter = TransactionFormatter()
         self.number_converter = NumberConverter()
+
+    @classmethod
+    def _canonicalize_token_ref(cls, token_ref: str) -> str:
+        """Canonicalize a user-provided token reference (symbol or name).
+
+        - Uppercases
+        - Strips non-alphanumeric characters (spaces, hyphens, etc.)
+
+        This intentionally does NOT hardcode aliases; instead we resolve robustly
+        by matching against known token symbols *and* token names.
+        """
+        return re.sub(r"[^A-Za-z0-9]", "", token_ref).upper()
+
+    @classmethod
+    def _token_details_match_ref(cls, token_ref_clean: str, token_details: Dict[str, Any]) -> bool:
+        """Return True if token_details matches a cleaned token reference."""
+        sym = cls._canonicalize_token_ref(str(token_details.get("symbol", "")))
+        name = cls._canonicalize_token_ref(str(token_details.get("name", "")))
+        return token_ref_clean in (sym, name)
+
+    @classmethod
+    def _token_details_best_match_score(cls, token_ref_clean: str, token_details: Dict[str, Any]) -> float:
+        """Compute similarity score (0..1) for a token ref against token details."""
+        sym = cls._canonicalize_token_ref(str(token_details.get("symbol", "")))
+        name = cls._canonicalize_token_ref(str(token_details.get("name", "")))
+        if not token_ref_clean:
+            return 0.0
+        # Exact matches should have been handled earlier, but keep them highest anyway.
+        if token_ref_clean in (sym, name):
+            return 1.0
+        return max(
+            difflib.SequenceMatcher(a=token_ref_clean, b=sym).ratio() if sym else 0.0,
+            difflib.SequenceMatcher(a=token_ref_clean, b=name).ratio() if name else 0.0,
+        )
+
+    @staticmethod
+    def _format_token_suggestion(symbol: str, name: str, address: str) -> str:
+        """Human-friendly suggestion string."""
+        sym = symbol.strip() or "?"
+        nm = name.strip() or "?"
+        addr = address
+        return f"{sym} ({nm}) {addr}"
+
+    async def _suggest_tokens(
+        self,
+        *,
+        token_ref: str,
+        user_id: Optional[str],
+        wallet_address: Optional[str],
+        limit: int = 5,
+    ) -> List[str]:
+        """Suggest likely tokens for a misspelled/unknown token reference.
+
+        Suggestions are based on fuzzy similarity against known symbols and names.
+        We search:
+        - user's tracked tokens (if available)
+        - TokenManager default tokens list (cached)
+        """
+        try:
+            from services.tokens import token_manager
+
+            token_ref_clean = self._canonicalize_token_ref(token_ref)
+            if not token_ref_clean:
+                return []
+
+            # Ensure default token cache is populated.
+            if not token_manager.default_tokens:
+                await token_manager._parse_default_token_list()
+
+            # Build candidate pool (address -> details), prefer richer details.
+            candidates_by_addr: Dict[str, Dict[str, Any]] = {}
+
+            if user_id:
+                try:
+                    tracked = await token_manager.get_tracked_tokens(user_id)
+                    for t in tracked:
+                        addr = str(t.get("token_address") or "")
+                        if not addr:
+                            continue
+                        candidates_by_addr[addr] = {
+                            "symbol": str(t.get("symbol") or ""),
+                            "name": str(t.get("name") or ""),
+                            "address": addr,
+                        }
+                except Exception:
+                    # Suggestions are best-effort; ignore failures.
+                    pass
+
+            for addr, details in token_manager.default_tokens.items():
+                addr_str = str(addr)
+                # Keep tracked-token details if present, otherwise use default list details.
+                candidates_by_addr.setdefault(
+                    addr_str,
+                    {
+                        "symbol": str(details.get("symbol") or ""),
+                        "name": str(details.get("name") or ""),
+                        "address": addr_str,
+                    },
+                )
+
+            scored: List[Tuple[float, str]] = []
+            for addr, details in candidates_by_addr.items():
+                score = self._token_details_best_match_score(token_ref_clean, details)
+                if score <= 0:
+                    continue
+                scored.append((score, addr))
+
+            if not scored:
+                return []
+
+            # Sort by similarity desc; compute balances only for the top few.
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_addrs = [addr for _score, addr in scored[: max(limit * 2, 10)]]
+
+            balances_by_addr: Dict[str, int] = {}
+            if wallet_address:
+                for addr in top_addrs:
+                    try:
+                        bal = await token_manager.get_token_balance(wallet_address, addr)
+                        balances_by_addr[addr] = int(bal)
+                    except Exception:
+                        balances_by_addr[addr] = 0
+
+            # Final ordering: similarity desc, then balance desc (if available).
+            top_ranked = sorted(
+                scored[: max(limit * 2, 10)],
+                key=lambda x: (x[0], balances_by_addr.get(x[1], 0)),
+                reverse=True,
+            )[:limit]
+
+            suggestions: List[str] = []
+            for _score, addr in top_ranked:
+                det = candidates_by_addr[addr]
+                suggestions.append(
+                    self._format_token_suggestion(
+                        symbol=str(det.get("symbol") or ""),
+                        name=str(det.get("name") or ""),
+                        address=str(det.get("address") or addr),
+                    )
+                )
+            return suggestions
+        except Exception:
+            return []
         
     async def call_view_method(
         self,
@@ -409,9 +553,16 @@ class TransactionManager:
                 if token_address:
                     resolved_path.append(token_address)
                 else:
+                    suggestions = await self._suggest_tokens(
+                        token_ref=token_ref,
+                        user_id=user_id,
+                        wallet_address=wallet_address,
+                        limit=5,
+                    )
+                    did_you_mean = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
                     # If can't resolve, raise an error with a helpful message
                     raise ValueError(
-                        f"Could not resolve token symbol '{token_ref}' to an address. "
+                        f"Could not resolve token reference '{token_ref}' to an address.{did_you_mean} "
                         f"Please ensure the token is in the default token list or use the token address instead."
                     )
         
@@ -423,18 +574,19 @@ class TransactionManager:
         user_id: Optional[str] = None,
         wallet_address: Optional[str] = None,
     ) -> Optional[str]:
-        """Resolve a token symbol to its contract address.
+        """Resolve a token reference (symbol or name) to its contract address.
         
         Prioritizes tokens with non-zero balances when wallet_address is provided.
         Falls back to default token list if no tracked tokens have balance.
 
         Resolution priority:
         1. If wallet_address provided: Check tracked tokens first, prefer highest balance
-        2. Default token list (authoritative for tokens not in wallet)
+        2. Default token list (authoritative for tokens not in wallet) by symbol
+        3. TokenManager default_tokens by symbol OR name
         3. Tracked tokens (fallback if not in default list)
         
         Args:
-            symbol: Token symbol to resolve (e.g., "CL8Y", "CZUSD")
+            symbol: Token reference to resolve (symbol or name; e.g., "CL8Y", "CZUSD", "CeramicLiberty.com")
             user_id: Optional user ID for context-aware resolution (checks tracked tokens first)
             wallet_address: Optional wallet address used for disambiguating tokens by balance
             
@@ -445,7 +597,7 @@ class TransactionManager:
             from utils.token import find_token
             from services.tokens import token_manager
             
-            symbol_upper = symbol.upper()
+            token_ref_clean = self._canonicalize_token_ref(symbol)
             
             # If wallet_address is provided, prioritize tokens with non-zero balance
             if wallet_address and user_id:
@@ -453,7 +605,7 @@ class TransactionManager:
                     tracked_tokens = await token_manager.get_tracked_tokens(user_id)
                     matching_tracked = [
                         token for token in tracked_tokens
-                        if token.get('symbol', '').upper() == symbol_upper
+                        if self._token_details_match_ref(token_ref_clean, token)
                     ]
 
                     if matching_tracked:
@@ -493,7 +645,7 @@ class TransactionManager:
                     logger.warning(f"Failed to check tracked tokens for symbol '{symbol}': {str(e)}")
             
             # 1) Default token list is authoritative (if no wallet context or no balance found)
-            token_info = await find_token(symbol=symbol)
+            token_info = await find_token(symbol=token_ref_clean)
             if token_info and token_info.get('address'):
                 address = self.web3.to_checksum_address(token_info['address'])
                 
@@ -521,29 +673,37 @@ class TransactionManager:
             if not token_manager.default_tokens:
                 await token_manager._parse_default_token_list()
             
-            # Search in default_tokens by symbol (case-insensitive)
+            # Search in default_tokens by symbol OR name (case/punctuation-insensitive)
+            matching_default_addrs: List[str] = []
             for address, details in token_manager.default_tokens.items():
-                if details['symbol'].upper() == symbol_upper:
-                    # If wallet_address provided, verify balance before returning
-                    if wallet_address:
+                if self._token_details_match_ref(token_ref_clean, details):
+                    matching_default_addrs.append(str(address))
+
+            if matching_default_addrs:
+                # If wallet_address provided, prefer the one with non-zero/highest balance.
+                if wallet_address:
+                    balances: List[tuple[int, str]] = []
+                    for addr in matching_default_addrs:
                         try:
-                            balance = await token_manager.get_token_balance(wallet_address, address)
-                            if balance > 0:
-                                logger.debug(f"Resolved '{symbol}' to default_tokens with balance: {address}")
-                                return str(address)
-                            else:
-                                logger.debug(
-                                    f"Default_tokens '{symbol}' has zero balance, "
-                                    f"will check tracked tokens as fallback"
-                                )
-                                continue
+                            bal = await token_manager.get_token_balance(wallet_address, addr)
                         except Exception:
-                            # If balance check fails, still return default address
-                            logger.debug(f"Resolved '{symbol}' to default_tokens: {address}")
-                            return str(address)
+                            bal = 0
+                        balances.append((int(bal), addr))
+                    balances.sort(key=lambda x: x[0], reverse=True)
+                    best_balance, best_addr = balances[0]
+                    if best_balance > 0:
+                        logger.debug(f"Resolved '{symbol}' to default_tokens with balance: {best_addr}")
                     else:
-                        logger.debug(f"Resolved '{symbol}' to default_tokens: {address}")
-                        return str(address)
+                        logger.debug(f"Resolved '{symbol}' to default_tokens (zero balance): {best_addr}")
+                    return self.web3.to_checksum_address(best_addr)
+
+                if len(matching_default_addrs) > 1:
+                    logger.warning(
+                        "Token reference '%s' matched multiple default tokens (%d); selecting first.",
+                        symbol,
+                        len(matching_default_addrs),
+                    )
+                return self.web3.to_checksum_address(matching_default_addrs[0])
 
             # 3) Fallback: use user's tracked tokens (if any)
             if user_id:
@@ -551,7 +711,7 @@ class TransactionManager:
                     tracked_tokens = await token_manager.get_tracked_tokens(user_id)
                     matching_tracked = [
                         token for token in tracked_tokens
-                        if token.get('symbol', '').upper() == symbol_upper
+                        if self._token_details_match_ref(token_ref_clean, token)
                     ]
 
                     if matching_tracked:
@@ -583,7 +743,7 @@ class TransactionManager:
                 except Exception as e:
                     logger.warning(f"Failed to check tracked tokens for symbol '{symbol}': {str(e)}")
             
-            logger.warning(f"Token symbol '{symbol}' not found in default token list or tracked tokens")
+            logger.warning(f"Token reference '{symbol}' not found in default token list or tracked tokens")
             return None
             
         except Exception as e:

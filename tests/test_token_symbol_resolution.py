@@ -25,6 +25,11 @@ TEST_TOKENS = {
         "name": "CZ USD",
         "decimals": 18
     },
+    "0xB2000000000000000000000000000000000000B2": {
+        "symbol": "CZB",
+        "name": "CZ Blue",
+        "decimals": 18
+    },
     "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82": {
         "symbol": "CAKE",
         "name": "PancakeSwap Token",
@@ -181,6 +186,44 @@ class TestTokenSymbolResolution:
             # Test mixed case
             result_mixed = await transaction_manager._resolve_token_symbol("Cl8Y")
             assert result_mixed is not None
+
+    @pytest.mark.asyncio
+    async def test_resolve_token_by_name_or_user_typed_name(
+        self,
+        transaction_manager: Any,
+        mock_token_manager: MagicMock,
+    ) -> None:
+        """Token reference resolution should handle name-like inputs (not only symbols)."""
+        # Force the "find_token by symbol" path to fail so we exercise name matching via default_tokens.
+        mock_find_token = AsyncMock(return_value=None)
+
+        with patch('utils.token.find_token', mock_find_token), \
+             patch('services.tokens.token_manager', mock_token_manager):
+            # User typed name without space/punctuation consistency
+            result = await transaction_manager._resolve_token_symbol("CZBLUE")
+            assert result == "0xB2000000000000000000000000000000000000B2"
+
+            # User typed a spaced name variant
+            result_spaced = await transaction_manager._resolve_token_symbol("CZ Blue")
+            assert result_spaced == "0xB2000000000000000000000000000000000000B2"
+
+    @pytest.mark.asyncio
+    async def test_unknown_token_provides_did_you_mean_suggestions(
+        self,
+        transaction_manager: Any,
+        mock_token_manager: MagicMock,
+    ) -> None:
+        """If user misspells a token, error should include 'did you mean' suggestions."""
+        mock_find_token = AsyncMock(return_value=None)
+
+        with patch('utils.token.find_token', mock_find_token), \
+             patch('services.tokens.token_manager', mock_token_manager):
+            with pytest.raises(ValueError) as exc_info:
+                await transaction_manager._resolve_token_symbols_in_path(["CL8Y", "CZBLU"])
+
+        msg = str(exc_info.value)
+        assert "Did you mean:" in msg
+        assert "CZB" in msg
     
     @pytest.mark.asyncio
     async def test_resolve_unknown_symbol_returns_none(

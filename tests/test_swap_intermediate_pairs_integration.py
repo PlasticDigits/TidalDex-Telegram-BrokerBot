@@ -49,6 +49,7 @@ class TestSwapRouteProbing:
         token_out = tm.web3.to_checksum_address("0x00000000000000000000000000000000000000D4")
 
         # Route outputs:
+        # 0) token_in->token_out (direct) : revert (no direct liquidity)
         # 1) token_in->czusd->token_out : output 100
         # 2) token_in->czb->token_out   : revert
         # 3) token_in->czusd->czb->token_out : output 150  (best)
@@ -57,6 +58,8 @@ class TestSwapRouteProbing:
             assert method == "getAmountsOut"
             amount, path = args
             assert amount == 1
+            if path == [token_in, token_out]:
+                raise ValueError("execution reverted: INSUFFICIENT_LIQUIDITY")
             if path == [token_in, czusd, token_out]:
                 return [1, 100]
             if path == [token_in, czb, token_out]:
@@ -96,6 +99,8 @@ class TestSwapRouteProbing:
             assert method == "getAmountsIn"
             amount_out, path = args
             assert amount_out == 100
+            if path == [token_in, token_out]:
+                raise ValueError("execution reverted: INSUFFICIENT_LIQUIDITY")
             if path == [token_in, czusd, token_out]:
                 return [12, 100]
             if path == [token_in, czb, token_out]:
@@ -119,6 +124,60 @@ class TestSwapRouteProbing:
 
         assert best_path == [token_in, czb, token_out]
         assert best_result[0] == 10
+
+    @pytest.mark.asyncio
+    async def test_select_best_route_prefers_direct_route_when_available(self, llm_app_config: Dict[str, Any]) -> None:
+        """Regression test: Direct route should be tried first and selected if it succeeds.
+        
+        This test ensures that when direct liquidity exists (e.g., CL8Y/CZB pair),
+        the direct route is tried first and selected, avoiding unnecessary intermediate hops.
+        """
+        session = LLMAppSession(user_id="123", llm_app_name="swap", llm_app_config=llm_app_config)
+
+        from app.base.llm_app_session import transaction_manager as tm
+        czusd = tm.web3.to_checksum_address("0x00000000000000000000000000000000000000A1")
+        czb = tm.web3.to_checksum_address("0x00000000000000000000000000000000000000B2")
+        token_in = tm.web3.to_checksum_address("0x00000000000000000000000000000000000000C3")
+        token_out = tm.web3.to_checksum_address("0x00000000000000000000000000000000000000D4")
+
+        call_order = []  # Track the order routes are tried
+
+        async def fake_call_view_method(_contract: str, _abi: List[Dict[str, Any]], method: str, args: List[Any], status_callback=None):
+            assert method == "getAmountsOut"
+            amount, path = args
+            assert amount == 1
+            call_order.append(path)
+            
+            # Direct route succeeds with good output
+            if path == [token_in, token_out]:
+                return [1, 200]  # Best output
+            # All intermediate routes fail with INSUFFICIENT_LIQUIDITY
+            if path == [token_in, czusd, token_out]:
+                raise ValueError("execution reverted: AmmLibrary: INSUFFICIENT_LIQUIDITY")
+            if path == [token_in, czb, token_out]:
+                raise ValueError("execution reverted: AmmLibrary: INSUFFICIENT_LIQUIDITY")
+            if path == [token_in, czusd, czb, token_out]:
+                raise ValueError("execution reverted: AmmLibrary: INSUFFICIENT_LIQUIDITY")
+            if path == [token_in, czb, czusd, token_out]:
+                raise ValueError("execution reverted: AmmLibrary: INSUFFICIENT_LIQUIDITY")
+            raise AssertionError(f"Unexpected path: {path}")
+
+        with patch("app.base.llm_app_session.transaction_manager._resolve_token_symbol", new=AsyncMock(side_effect=lambda s: czusd if s == "CZUSD" else czb)), \
+             patch("app.base.llm_app_session.transaction_manager.call_view_method", new=AsyncMock(side_effect=fake_call_view_method)):
+            best_path, best_result = await session._select_best_swap_route(
+                contract_address="0xrouter",
+                abi=[],
+                quote_method="getAmountsOut",
+                amount=1,
+                token_in=token_in,
+                token_out=token_out,
+            )
+
+        # Direct route should be selected
+        assert best_path == [token_in, token_out]
+        assert best_result[-1] == 200
+        # Direct route should be tried first
+        assert call_order[0] == [token_in, token_out], f"Expected direct route first, got: {call_order}"
 
 
 @pytest.mark.integration

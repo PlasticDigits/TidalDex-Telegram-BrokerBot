@@ -195,15 +195,49 @@ class LLMAppSession:
         raise ValueError(f"Invalid token reference in path: {token_ref!r}")
 
     @staticmethod
-    def _normalize_path(path: List[str]) -> List[str]:
-        """Normalize a path by removing consecutive duplicates."""
-        if not path:
-            return []
-        normalized: List[str] = [path[0]]
-        for item in path[1:]:
-            if item != normalized[-1]:
-                normalized.append(item)
-        return normalized
+    def _build_swap_route_candidates(
+        *,
+        token_in_addr: str,
+        token_out_addr: str,
+        czusd_addr: str,
+        czb_addr: str,
+    ) -> List[List[str]]:
+        """Build swap route candidates for quoting.
+
+        Important: Never insert the input/output token as an "intermediate" hop.
+        Doing so can create cyclic routes like A -> B -> C -> B which are rarely
+        desired and can lead to confusing liquidity errors.
+        """
+        if token_in_addr == token_out_addr:
+            raise ValueError("token_in and token_out must be different for route selection")
+
+        raw: List[List[str]] = [
+            [token_in_addr, token_out_addr],  # direct route (always first)
+        ]
+
+        endpoints = {token_in_addr, token_out_addr}
+        intermediates = [czusd_addr, czb_addr]
+
+        # Single-hop intermediate routes
+        for mid in intermediates:
+            if mid not in endpoints:
+                raw.append([token_in_addr, mid, token_out_addr])
+
+        # Two-hop intermediate routes (both intermediates must be usable)
+        if czusd_addr not in endpoints and czb_addr not in endpoints and czusd_addr != czb_addr:
+            raw.append([token_in_addr, czusd_addr, czb_addr, token_out_addr])
+            raw.append([token_in_addr, czb_addr, czusd_addr, token_out_addr])
+
+        # De-duplicate while preserving order.
+        candidates: List[List[str]] = []
+        seen: set[tuple[str, ...]] = set()
+        for cand in raw:
+            key = tuple(cand)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(cand)
+        return candidates
 
     async def _select_best_swap_route(
         self,
@@ -216,9 +250,10 @@ class LLMAppSession:
         token_out: str,
         status_callback: Optional[Any] = None,
     ) -> tuple[List[str], Any]:
-        """Try 4 possible TidalDex routes and pick the best non-reverting one.
+        """Try multiple TidalDex routes and pick the best non-reverting one.
 
         Supported route patterns (after resolving token symbols):
+        - token_in -> token_out (direct route, tried first)
         - token_in -> CZUSD -> token_out
         - token_in -> CZB   -> token_out
         - token_in -> CZUSD -> CZB -> token_out
@@ -245,24 +280,19 @@ class LLMAppSession:
         token_in_addr = self._to_router_path_token(token_in)
         token_out_addr = self._to_router_path_token(token_out)
 
-        raw_candidates: List[List[str]] = [
-            [token_in_addr, czusd_addr, token_out_addr],
-            [token_in_addr, czb_addr, token_out_addr],
-            [token_in_addr, czusd_addr, czb_addr, token_out_addr],
-            [token_in_addr, czb_addr, czusd_addr, token_out_addr],
-        ]
+        candidates = self._build_swap_route_candidates(
+            token_in_addr=token_in_addr,
+            token_out_addr=token_out_addr,
+            czusd_addr=czusd_addr,
+            czb_addr=czb_addr,
+        )
 
-        candidates: List[List[str]] = []
-        seen: set[tuple[str, ...]] = set()
-        for cand in raw_candidates:
-            normalized = self._normalize_path(cand)
-            if len(normalized) < 2:
-                continue
-            key = tuple(normalized)
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append(normalized)
+        logger.debug(
+            "Route candidates for %s -> %s: %s",
+            token_in_addr[:10] + "...",
+            token_out_addr[:10] + "...",
+            [f"{len(c) - 1} hops" for c in candidates]
+        )
 
         best_path: Optional[List[str]] = None
         best_result: Any = None
@@ -298,10 +328,27 @@ class LLMAppSession:
                         best_path = cand
                         best_result = result
             except Exception as e:
+                error_msg = str(e)
+                # Log route attempt for debugging
+                logger.debug(
+                    "Route %d/%d failed: %s -> %s: %s",
+                    idx,
+                    len(candidates),
+                    cand[0][:10] + "..." if len(cand) > 0 else "?",
+                    cand[-1][:10] + "..." if len(cand) > 0 else "?",
+                    error_msg[:100]  # Truncate long error messages
+                )
                 errors.append(f"route={cand}: {e}")
 
         if best_path is None:
             err_preview = "; ".join(errors[:4]) + (" ..." if len(errors) > 4 else "")
+            logger.error(
+                "All %d swap routes failed for %s. First route tried: %s. Errors: %s",
+                len(candidates),
+                quote_method,
+                candidates[0] if candidates else "none",
+                err_preview
+            )
             raise ValueError(f"All swap routes failed for {quote_method}. Errors: {err_preview}")
 
         logger.info(
