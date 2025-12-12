@@ -33,13 +33,13 @@ class LLMInterface:
         # Output token budget. Kept relatively small for cost, but we may retry with a larger
         # budget if the model returns truncated/empty output.
         try:
-            self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+            self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "50000"))
         except ValueError:
             logger.warning(
-                "Invalid OPENAI_MAX_TOKENS value '%s', using default 1000",
+                "Invalid OPENAI_MAX_TOKENS value '%s', using default 50000",
                 os.getenv("OPENAI_MAX_TOKENS"),
             )
-            self.max_tokens = 1000
+            self.max_tokens = 50000
         
         # Newer models (gpt-5-*, o1-*, o3-*) use max_completion_tokens instead of max_tokens
         self._uses_new_token_param = self._check_new_model_format(self.model)
