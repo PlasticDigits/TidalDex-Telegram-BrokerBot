@@ -162,3 +162,4 @@ class TestFormatTokenBalances:
         # Both should show addresses due to case-insensitive duplicate detection
         for line in result:
             assert "[" in line
+

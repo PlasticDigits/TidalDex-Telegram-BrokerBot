@@ -319,3 +319,4 @@ class TestTokenResolutionBalancePreference:
             balance_calls = mock_token_manager.get_token_balance.call_args_list
             checked_addresses = [call[0][1].lower() for call in balance_calls]
             assert CL8Y_NEW.lower() in checked_addresses or CL8Y_OLD.lower() in checked_addresses
+
