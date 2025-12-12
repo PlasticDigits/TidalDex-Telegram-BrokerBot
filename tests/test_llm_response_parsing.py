@@ -262,6 +262,70 @@ class TestLLMResponseParsing:
         assert parsed["response_type"] == "chat"
         assert "error" in parsed
         assert "parse" in str(parsed.get("error", "")).lower()
+
+    def test_parse_dict_content_shape(self):
+        """Test parsing when message.content is a dict (some clients/versions)."""
+        response = {
+            "response_type": "chat",
+            "message": "Hello from dict content!"
+        }
+        mock_api_response = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": {"type": "output_text", "text": json.dumps(response)}
+                    },
+                }
+            ]
+        }
+
+        parsed = self.llm._parse_openai_response(mock_api_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Hello from dict content!"
+        assert parsed.get("_llm_finish_reason") == "stop"
+
+    def test_parse_list_content_parts_shape(self):
+        """Test parsing when message.content is a list of parts."""
+        response = {
+            "response_type": "chat",
+            "message": "Hello from list parts!"
+        }
+        mock_api_response = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": [{"type": "output_text", "text": json.dumps(response)}]
+                    },
+                }
+            ]
+        }
+
+        parsed = self.llm._parse_openai_response(mock_api_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed["message"] == "Hello from list parts!"
+        assert parsed.get("_llm_finish_reason") == "stop"
+
+    def test_empty_content_with_length_finish_reason(self):
+        """Test the exact 'empty content + finish_reason=length' path."""
+        mock_api_response = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "refusal": None,
+                        "annotations": [],
+                    },
+                }
+            ]
+        }
+        parsed = self.llm._parse_openai_response(mock_api_response)
+        assert parsed["response_type"] == "chat"
+        assert parsed.get("error") == "empty_llm_response"
+        assert parsed.get("_llm_finish_reason") == "length"
     
     def test_parse_swap_view_call_response(self):
         """Test parsing a swap-related view_call response (simulating swap app usage)."""

@@ -30,7 +30,9 @@ class LLMInterface:
         # Default to gpt-5-nano (cheapest: $0.10/$0.40 per 1M tokens)
         # Requires max_completion_tokens instead of max_tokens
         self.model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
-        self.max_tokens = 1000
+        # Output token budget. Kept relatively small for cost, but we may retry with a larger
+        # budget if the model returns truncated/empty output.
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
         
         # Newer models (gpt-5-*, o1-*, o3-*) use max_completion_tokens instead of max_tokens
         self._uses_new_token_param = self._check_new_model_format(self.model)
@@ -78,14 +80,41 @@ class LLMInterface:
             
             # Make API request
             response = await self._call_openai(messages, function_schema)
-            
+
             # Parse response
             parsed_response = self._parse_openai_response(response)
-            
+
+            # If the model hit the output token limit, it may return empty or invalid JSON
+            # (especially with strict schema). Retry once with a larger budget and a clear
+            # regeneration instruction.
+            if (
+                parsed_response.get("error") in {"empty_llm_response", "json_parse_error"}
+                and parsed_response.get("_llm_finish_reason") == "length"
+            ):
+                retry_messages = messages + [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was empty or truncated. "
+                            "Regenerate the COMPLETE response as ONE valid JSON object that conforms to the schema. "
+                            "Return JSON only, no markdown. Keep the message concise."
+                        ),
+                    }
+                ]
+                retry_max_tokens = self._get_retry_max_tokens(self.max_tokens)
+                response_retry = await self._call_openai(
+                    retry_messages,
+                    function_schema,
+                    max_tokens_override=retry_max_tokens,
+                )
+                parsed_retry = self._parse_openai_response(response_retry)
+                if not parsed_retry.get("error"):
+                    parsed_response = parsed_retry
+
             # Add assistant response to history
             if parsed_response.get("message"):
                 session.add_message("assistant", parsed_response["message"])
-            
+
             return parsed_response
             
         except httpx.HTTPStatusError as e:
@@ -262,7 +291,8 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
     async def _call_openai(
         self, 
         messages: List[Dict[str, str]], 
-        function_schema: Dict[str, Any]
+        function_schema: Dict[str, Any],
+        max_tokens_override: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Make API call to OpenAI.
         
@@ -287,12 +317,14 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
             }
         }
         
+        max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
+
         # Use appropriate token parameter based on model type
         if self._uses_new_token_param:
-            payload["max_completion_tokens"] = self.max_tokens
+            payload["max_completion_tokens"] = max_tokens
             # Note: temperature may not be supported for all reasoning models
         else:
-            payload["max_tokens"] = self.max_tokens
+            payload["max_tokens"] = max_tokens
             payload["temperature"] = 0.1  # Lower temperature for more consistent responses
         
         async with httpx.AsyncClient(timeout=30) as client:
@@ -342,6 +374,20 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
         if isinstance(content, str):
             return content
 
+        # Some APIs/clients can return a dict object for content.
+        # Common shapes: {"type":"output_text","text":"..."}, {"type":"text","text":"..."}
+        if isinstance(content, dict):
+            direct_text = content.get("text") or content.get("content") or content.get("value")
+            if isinstance(direct_text, str):
+                return direct_text
+
+            # Sometimes nested parts: {"parts": [...]} or {"content": [...]}.
+            for key in ("parts", "content", "items"):
+                maybe_parts = content.get(key)
+                if isinstance(maybe_parts, list):
+                    return self._coerce_openai_content_to_text(maybe_parts)
+            return None
+
         # Some clients / versions may represent message content as a list of parts.
         if isinstance(content, list):
             parts: List[str] = []
@@ -366,6 +412,12 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
 
         # Unknown/unsupported type
         return None
+
+    def _get_retry_max_tokens(self, base_max_tokens: int) -> int:
+        """Compute a safe, higher output budget for a single retry."""
+        # Ensure enough budget to emit the required JSON object even if the first attempt
+        # had an extremely low cap.
+        return max(512, base_max_tokens * 4)
     
     def _parse_openai_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse OpenAI API response.
@@ -401,6 +453,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                         "response_type": "chat",
                         "message": refusal_text,
                         "error": "refusal",
+                        "_llm_finish_reason": finish_reason,
                     }
 
                 if finish_reason == "content_filter":
@@ -412,6 +465,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                             "Please try rephrasing your request."
                         ),
                         "error": "content_filter",
+                        "_llm_finish_reason": finish_reason,
                     }
 
                 logger.error(
@@ -426,6 +480,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                         "If this keeps happening, the service may be refusing or failing upstream."
                     ),
                     "error": "empty_llm_response",
+                    "_llm_finish_reason": finish_reason,
                 }
 
             # Normalize to JSON text (strip fences / leading text if any)
@@ -456,6 +511,7 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                     if field not in contract_call:
                         raise ValueError(f"Missing required field '{field}' in contract_call")
             
+            parsed["_llm_finish_reason"] = finish_reason
             return parsed
             
         except json.JSONDecodeError as e:
@@ -472,13 +528,23 @@ Remember: Always be helpful, accurate, and security-conscious. Users should unde
                     "Please try rephrasing your request."
                 ),
                 "error": "json_parse_error",
+                "_llm_finish_reason": (
+                    response.get("choices", [{}])[0].get("finish_reason")  # type: ignore[union-attr]
+                    if isinstance(response.get("choices"), list) and response.get("choices")
+                    else None
+                ),
             }
         except Exception as e:
             logger.error(f"Failed to parse OpenAI response: {str(e)}")
             return {
                 "response_type": "chat", 
                 "message": "I encountered an error processing your request.",
-                "error": str(e)
+                "error": str(e),
+                "_llm_finish_reason": (
+                    response.get("choices", [{}])[0].get("finish_reason")  # type: ignore[union-attr]
+                    if isinstance(response.get("choices"), list) and response.get("choices")
+                    else None
+                ),
             }
     
     def _parse_api_error(self, response: httpx.Response) -> str:
