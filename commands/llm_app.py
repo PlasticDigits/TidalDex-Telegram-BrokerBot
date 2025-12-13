@@ -13,7 +13,7 @@ from services.pin import pin_manager
 from app.base import llm_app_manager
 from app.base.llm_interface import get_llm_interface
 from app.base.llm_app_session import SessionState, LLMAppSession
-from utils.status_updates import create_status_callback
+from utils.status_updates import create_status_callback, AnimatedStatusMessage
 from utils.config import BSC_SCANNER_URL
 from utils.swap_intent import is_swap_intent, parse_slippage_bps
 from db.utils import hash_user_id
@@ -274,31 +274,46 @@ async def _process_llm_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     
     try:
-        # Show typing indicator
-        await update.message.chat.send_action("typing")
+        # Show animated "thinking" status while processing
+        work_msg = await update.message.reply_text("🧠 Thinking...")
+        ticker = AnimatedStatusMessage(
+            work_msg,
+            header="🧠 Working on it",
+            stage="Thinking",
+            interval_s=1.0
+        )
+        await ticker.start()
         
-        # Process message with LLM (use get_llm_interface to handle missing API key gracefully)
-        llm_interface = get_llm_interface()
-        response = await llm_interface.process_user_message(session, user_message)
-        
-        if response["response_type"] == "chat":
-            # Simple conversational response
-            await update.message.reply_text(response["message"])
-            return CONVERSING
+        try:
+            # Process message with LLM (use get_llm_interface to handle missing API key gracefully)
+            ticker.set_stage("Calling LLM")
+            llm_interface = get_llm_interface()
+            response = await llm_interface.process_user_message(session, user_message)
             
-        elif response["response_type"] == "view_call":
-            # Handle view (read-only) call
-            return await handle_view_call(update, context, session, response)
-            
-        elif response["response_type"] == "write_call":
-            # Handle write (transaction) call
-            return await handle_write_call(update, context, session, response)
-            
-        else:
-            await update.message.reply_text(
-                "❌ I received an unexpected response type. Please try again."
-            )
-            return CONVERSING
+            # Stop animation and handle response
+            if response["response_type"] == "chat":
+                # Simple conversational response - reuse the same message
+                await ticker.stop(final_text=response["message"])
+                return CONVERSING
+                
+            elif response["response_type"] == "view_call":
+                # Stop animation - handle_view_call will show its own status
+                await ticker.stop()
+                return await handle_view_call(update, context, session, response)
+                
+            elif response["response_type"] == "write_call":
+                # Stop animation - handle_write_call will show its own status
+                await ticker.stop()
+                return await handle_write_call(update, context, session, response)
+                
+            else:
+                await ticker.stop(final_text="❌ I received an unexpected response type. Please try again.")
+                return CONVERSING
+                
+        except Exception as e:
+            # Ensure ticker stops even if there's an error
+            await ticker.stop()
+            raise
             
     except Exception as e:
         logger.error(f"Error handling conversation for user {hash_user_id(user_id)}: {str(e)}")
