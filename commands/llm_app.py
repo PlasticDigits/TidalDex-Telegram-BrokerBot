@@ -544,10 +544,12 @@ async def execute_confirmed_transaction(query: CallbackQuery, context: ContextTy
         
         if result and result.get('status') == 1:
             tx_hash = result.get('tx_hash', '')
+            # Ensure tx_hash has 0x prefix for display and URL
+            tx_hash_with_prefix = tx_hash if tx_hash.startswith('0x') else f'0x{tx_hash}'
             await query.edit_message_text(
                 f"✅ **Transaction Successful!**\n\n"
-                f"🔗 **Transaction Hash:** `{tx_hash}`\n"
-                f"🌐 **View on BSCScan:** [Click here]({BSC_SCANNER_URL}/tx/{tx_hash})\n\n"
+                f"🔗 **Transaction Hash:** `{tx_hash_with_prefix}`\n"
+                f"🌐 **View on BSCScan:** [Click here]({BSC_SCANNER_URL}/tx/{tx_hash_with_prefix})\n\n"
                 f"What else would you like to do?"
             , parse_mode='Markdown')
         else:

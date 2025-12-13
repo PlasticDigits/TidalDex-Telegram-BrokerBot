@@ -163,3 +163,4 @@ class TestFormatTokenBalances:
         for line in result:
             assert "[" in line
 
+
