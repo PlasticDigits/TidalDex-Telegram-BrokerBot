@@ -47,10 +47,13 @@ def _format_token_balances(token_balances: Dict[str, Any]) -> List[str]:
     for token_addr, balance_info in token_balances.items():
         symbol: str = str(balance_info.get('symbol', '')).strip()
         name: str = balance_info.get('name', 'Unknown')
-        formatted_balance: str = format_token_balance(
-            balance_info.get('raw_balance', 0),
-            balance_info.get('decimals', 18)
-        )
+        if balance_info.get("error"):
+            formatted_balance = "⚠️ unavailable"
+        else:
+            formatted_balance = format_token_balance(
+                balance_info.get('raw_balance', 0),
+                balance_info.get('decimals', 18)
+            )
         # Show address if duplicate symbol exists
         if symbol_counts.get(symbol.upper(), 0) > 1:
             addr_short = token_addr[:8] + '...' + token_addr[-6:]

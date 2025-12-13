@@ -140,22 +140,93 @@ async def get_token_balance(wallet_address: str, token_address: str) -> int:
     """
     if not w3.is_address(wallet_address) or not w3.is_address(token_address):
         return 0
-        
-    # Convert to checksum addresses
-    wallet_address = w3.to_checksum_address(wallet_address)
-    token_address = w3.to_checksum_address(token_address)
-    
-    try:
-        # Create contract instance
-        contract = w3.eth.contract(address=token_address, abi=ERC20_ABI)
-        
-        # Get token balance
-        balance = int(contract.functions.balanceOf(wallet_address).call())
-        
-        return balance
-    except Exception as e:
-        logger.error(f"Error getting token balance for {wallet_address} ({token_address}): {e}")
+
+    raise_on_error = False
+    retries = 2
+    retry_delay_s = 0.4
+
+    return await get_token_balance_with_options(
+        wallet_address,
+        token_address,
+        raise_on_error=raise_on_error,
+        retries=retries,
+        retry_delay_s=retry_delay_s,
+    )
+
+
+class TokenBalanceFetchError(Exception):
+    """Raised when a token balance cannot be fetched after retries."""
+
+
+async def get_token_balance_with_options(
+    wallet_address: str,
+    token_address: str,
+    *,
+    raise_on_error: bool = False,
+    retries: int = 2,
+    retry_delay_s: float = 0.4,
+) -> int:
+    """
+    Gets the raw token balance for a wallet, with optional retries and error raising.
+
+    This is used by balance-sensitive workflows (like the LLM app) to avoid treating
+    transient RPC failures as a real zero balance.
+
+    Args:
+        wallet_address: The wallet address
+        token_address: The ERC20 contract address
+        raise_on_error: If True, raise TokenBalanceFetchError on failure.
+        retries: Number of retries after the initial attempt.
+        retry_delay_s: Delay between retries (seconds).
+
+    Returns:
+        Raw token balance (without decimal adjustment). Returns 0 for invalid addresses.
+
+    Raises:
+        TokenBalanceFetchError: If raise_on_error is True and all attempts fail.
+    """
+    import asyncio
+
+    if not w3.is_address(wallet_address) or not w3.is_address(token_address):
         return 0
+
+    # Convert to checksum addresses
+    wallet_checksum = w3.to_checksum_address(wallet_address)
+    token_checksum = w3.to_checksum_address(token_address)
+
+    last_err: Exception | None = None
+    attempts = max(0, int(retries)) + 1
+
+    for attempt_idx in range(attempts):
+        try:
+            contract = w3.eth.contract(address=token_checksum, abi=ERC20_ABI)
+            balance = int(contract.functions.balanceOf(wallet_checksum).call())
+            return balance
+        except Exception as e:
+            last_err = e
+            logger.warning(
+                "Error getting token balance (attempt %s/%s) for %s (%s): %s",
+                attempt_idx + 1,
+                attempts,
+                wallet_checksum,
+                token_checksum,
+                str(e),
+            )
+            if attempt_idx < (attempts - 1) and retry_delay_s > 0:
+                await asyncio.sleep(retry_delay_s)
+
+    if raise_on_error:
+        raise TokenBalanceFetchError(
+            f"Failed to fetch token balance for {wallet_checksum} ({token_checksum}) after {attempts} attempts"
+        ) from last_err
+
+    logger.error(
+        "Failed to fetch token balance for %s (%s) after %s attempts; returning 0",
+        wallet_checksum,
+        token_checksum,
+        attempts,
+    )
+    return 0
 
 def format_token_balance(balance: int, decimals: int = 18) -> str:
     """

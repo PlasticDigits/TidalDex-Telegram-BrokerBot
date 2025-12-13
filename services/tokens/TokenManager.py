@@ -23,7 +23,12 @@ from db.track import get_token_balance_history as db_get_token_balance_history
 from services.wallet import wallet_manager
 from services.pin import pin_manager
 from db.utils import hash_user_id
-from utils.token_utils import get_token_balance, get_token_info 
+from utils.token_utils import (
+    TokenBalanceFetchError,
+    format_token_balance,
+    get_token_balance_with_options,
+    get_token_info,
+)
 from utils.web3_connection import w3
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,7 @@ class TokenBalance(TypedDict):
     balance: float
     raw_balance: int
     decimals: int
+    error: Optional[str]
 
 class TokenBalanceHistory(TypedDict):
     """Type definition for token balance history entry."""
@@ -467,8 +473,27 @@ class TokenManager:
                 # Convert token address to checksum address
                 token_address = w3.to_checksum_address(token["token_address"])
                 
-                # Get balance using the contract's balanceOf function
-                raw_balance = await get_token_balance(wallet_address, token_address)
+                raw_balance: int = 0
+                balance_error: Optional[str] = None
+                try:
+                    # Get balance using the contract's balanceOf function.
+                    # Use retries and surface "unavailable" instead of silently treating RPC errors as 0.
+                    raw_balance = await get_token_balance_with_options(
+                        wallet_address,
+                        str(token_address),
+                        raise_on_error=True,
+                        retries=2,
+                        retry_delay_s=0.4,
+                    )
+                except TokenBalanceFetchError as e:
+                    balance_error = "unavailable"
+                    logger.warning(
+                        "Token balance unavailable for %s (%s) user %s: %s",
+                        token.get("symbol"),
+                        token_address,
+                        hash_user_id(user_id),
+                        str(e),
+                    )
                 
                 # Get token decimals
                 decimals = token.get("decimals", 18)
@@ -476,7 +501,7 @@ class TokenManager:
                     decimals = 18
                 
                 # Calculate human-readable balance
-                balance = raw_balance / (10 ** decimals)
+                balance = raw_balance / (10 ** decimals) if balance_error is None else 0.0
                 
                 # Skip if required fields are missing
                 if token["symbol"] is None or token["name"] is None:
@@ -489,7 +514,8 @@ class TokenManager:
                     name=token["name"],
                     balance=balance,
                     raw_balance=raw_balance,
-                    decimals=decimals
+                    decimals=decimals,
+                    error=balance_error,
                 )
                 
             except Exception as e:

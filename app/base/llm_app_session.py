@@ -15,6 +15,7 @@ from services.pin import pin_manager
 from services.tokens import token_manager
 from services.transaction import transaction_manager, transaction_formatter
 from db.utils import hash_user_id
+from utils.token_utils import format_token_balance
 
 logger = logging.getLogger(__name__)
 
@@ -149,10 +150,17 @@ class LLMAppSession:
         # Format token balances for LLM context
         balance_info = []
         for token_address, balance_data in self.token_balances.items():
+            if balance_data.get("error"):
+                llm_balance: str = "unavailable"
+            else:
+                llm_balance = format_token_balance(
+                    int(balance_data.get("raw_balance", 0)),
+                    int(balance_data.get("decimals", 18)),
+                )
             balance_info.append({
                 "symbol": balance_data["symbol"],
                 "name": balance_data["name"],
-                "balance": balance_data["balance"],
+                "balance": llm_balance,
                 "address": token_address
             })
         
