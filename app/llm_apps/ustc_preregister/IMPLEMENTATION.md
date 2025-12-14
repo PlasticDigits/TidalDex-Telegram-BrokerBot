@@ -1,32 +1,63 @@
-# USTC+ PREREGISTER App Implementation Plan
+# USTC+ Preregister LLM App Implementation Plan (Updated)
 
 ## Overview
 
-This document outlines the implementation plan for adding a new "ustc_preregister" app to the TidalDex Telegram Bot. The app allows users to interact with the USTC Preregister smart contract for depositing and withdrawing USTC-cb tokens.
+This document updates the original plan for the `ustc_preregister` conversational `/llm_app` after significant refactors in the LLM app framework.
 
-## App Requirements
+The goal is still the same: let users interact with the USTC Preregister smart contract to:
 
-### 1. View Global Stats
-- **Total Deposits**: Display total deposits across all users using `getTotalDeposits()`
-- **Total Users**: Display total number of users using `getUserCount()`
+- View global stats
+- View their deposit for the active wallet
+- Deposit / withdraw USTC-cb, including `"ALL"` shorthand
 
-### 2. View Wallet Stats
-- **Active Wallet Deposit**: Display the deposit amount for the user's currently active wallet using `getUserDeposit(wallet_address)`
+## What changed in the codebase (critical)
 
-### 3. Deposit/Withdraw Operations
-- **Deposit**: Call `deposit(amount)` with "ALL" meaning the total active wallet's USTC-cb balance
-- **Withdraw**: Call `withdraw(amount)` with "ALL" meaning the active wallet's `getUserDeposit` amount
+The current LLM app system is centered around these modules:
 
-## Constants
+- `app/base/llm_app_manager.py`: discovers `app/llm_apps/*/config.json` and creates `LLMAppSession`.
+- `app/base/llm_app_session.py`: owns wallet context, performs view calls, prepares write calls, stores a `PendingTransaction`.
+- `services/transaction/transaction_manager.py`: converts parameters, builds previews, validates token pairs, runs approvals, executes view/write calls.
+- `commands/llm_app.py`: Telegram conversation flow, welcome messages, and `format_view_result()`.
+- `app/base/llm_interface.py`: system prompt building + OpenAI response parsing (JSON schema is `app/schemas/app_json_schema.json`).
 
-- **USTC-cb Token Address**: `0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055`
-- **Environment Variable for Contract**: `USTC_PREREGISTER_ADDRESS`
+Important behavioral details that affect this app design:
 
----
+1. **Defaults are now applied**: `TransactionManager.process_parameters()` applies `parameter_processing.*.default` *for missing required inputs* (i.e., those listed in the method’s `inputs` array).
+2. **Token validation + approvals read from `raw_params`**:
+   - `TransactionFormatter.validate_token_amount_pairs()` resolves token refs from `raw_params`.
+   - `TransactionManager._ensure_token_approval()` resolves token refs from `raw_params`.
+   - Therefore **`token_address` must be present in `raw_params`** for deposit/withdraw previews and execution.
+3. **`process_parameters()` order sensitivity**:
+   - When converting a `token_amount` with `get_decimals_from: "token_address"`, `token_address` must already be present in the in-progress processed dict.
+   - If the LLM returns `{ "amount": "10", "token_address": "0x..." }` in that order, conversion may see a missing `token_address`.
+   - We should make this robust in code by **normalizing parameter dict order** and/or **using raw integer amounts when resolving `"ALL"`** (ints bypass human conversion in `process_parameters()`).
 
-## Implementation Steps
+## App requirements
 
-### Step 1: Create App Directory Structure
+### 1) Global stats (view calls)
+
+- `getTotalDeposits() -> uint256`: total deposited amount (raw units)
+- `getUserCount() -> uint256`: number of users
+
+### 2) Wallet stats (view call)
+
+- `getUserDeposit(address user) -> uint256`: deposit for active wallet
+
+### 3) Deposit / withdraw (write calls)
+
+- `deposit(uint256 amount)`
+  - `"ALL"` means “deposit my entire USTC-cb wallet balance”
+- `withdraw(uint256 amount)`
+  - `"ALL"` means “withdraw my entire deposited amount”
+
+## Constants / configuration
+
+- **USTC-cb token address (constant enforced in code)**: `0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055`
+- **Contract address env var**: `USTC_PREREGISTER_ADDRESS`
+
+## Implementation steps (updated for current repo)
+
+### Step 1: Create app directory structure
 
 ```
 app/llm_apps/ustc_preregister/
@@ -37,11 +68,22 @@ app/llm_apps/ustc_preregister/
 └── IMPLEMENTATION.md
 ```
 
-### Step 2: Copy ABI File
+### Step 2: Copy ABI file
 
-Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregister/abi/USTCPreregister.json`.
+Copy:
 
-### Step 3: Create config.json
+- Source: `ABI/USTCPreregister.json`
+- Destination: `app/llm_apps/ustc_preregister/abi/USTCPreregister.json`
+
+### Step 3: Create `config.json` (compatible with TransactionManager)
+
+Key points for this repo:
+
+- Keep contract function `inputs` aligned to the actual ABI.
+- Include a `token_amount_pairs` entry for deposit so approvals can be computed.
+- Include `token_address` in `raw_params` (injected by session) even though the contract method doesn’t take it as an input.
+
+Recommended config (shape mirrors `app/llm_apps/swap/config.json`):
 
 ```json
 {
@@ -57,7 +99,7 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
     "view": [
       {
         "name": "getTotalDeposits",
-        "description": "Get total deposits across all users",
+        "description": "Get total deposits across all users (raw uint256)",
         "inputs": [],
         "contract": "preregister"
       },
@@ -69,7 +111,7 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
       },
       {
         "name": "getUserDeposit",
-        "description": "Get deposit amount for a specific wallet address",
+        "description": "Get the deposited amount for a wallet address (raw uint256)",
         "inputs": ["user"],
         "contract": "preregister"
       }
@@ -77,7 +119,7 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
     "write": [
       {
         "name": "deposit",
-        "description": "Deposit USTC-cb tokens into the preregister contract",
+        "description": "Deposit USTC-cb into the preregister contract",
         "inputs": ["amount"],
         "contract": "preregister",
         "requires_token_approval": true,
@@ -94,7 +136,7 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
       },
       {
         "name": "withdraw",
-        "description": "Withdraw USTC-cb tokens from the preregister contract",
+        "description": "Withdraw USTC-cb from the preregister contract",
         "inputs": ["amount"],
         "contract": "preregister",
         "requires_token_approval": false,
@@ -103,7 +145,7 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
           {
             "token_param": "token_address",
             "amount_param": "amount",
-            "direction": "withdraw",
+            "direction": "output",
             "display_as": "Withdraw {amount} {symbol}"
           }
         ],
@@ -127,284 +169,196 @@ Copy the ABI file from `ABI/USTCPreregister.json` to `app/llm_apps/ustc_preregis
 }
 ```
 
-**Important Notes:**
-- The `parameter_processing.*.default` field is NOT automatically applied by the current `process_parameters()` implementation. Defaults must be set explicitly in code or by the LLM.
-- The LLM **must** include `token_address` in parameters for deposit/withdraw, or code must inject it.
+Notes:
 
-### Step 4: Create STYLE.md
+- `direction: "payment"` is important because approvals look for `direction` in `["input", "payment", "stake"]`.
+- For withdraw, the direction is informational only (approval is disabled).
+- `token_address` is not a contract input. It exists to enable:
+  - token pair validation (`validate_token_amount_pairs()`)
+  - token approvals (`_ensure_token_approval()`)
+  - decimals conversion (`get_decimals_from: "token_address"`)
 
-```markdown
-# USTC+ Preregister App Style Guide
+### Step 4: Create `STYLE.md`
 
-## Personality & Tone
+Keep the existing style guide intent, but update the “requirements” wording:
 
-- **Professional and informative** - Explain the preregistration program clearly
-- **Transparent** - Always show current balances and deposit amounts
-- **Safety-focused** - Emphasize verification of amounts before confirming
+- The LLM **should** include `token_address` and `"ALL"` when relevant.
+- The system will also **enforce and inject** `token_address` for safety.
 
-## Vocabulary & Language
+### Step 5: Update `LLMAppSession` to normalize parameters and resolve `"ALL"`
 
-### Preferred Terms
+File: `app/base/llm_app_session.py`
 
-- "deposit" (not "stake" or "lock")
-- "withdraw" (not "unstake" or "unlock")
-- "preregistration" (official program terminology)
-- "USTC-cb" (correct token symbol)
+Add a small app-specific normalization step that runs **before** calling:
 
-### Avoid These Terms
+- `transaction_manager.prepare_transaction_preview()` (write calls)
+- `transaction_manager.process_parameters()` (view calls, for `getUserDeposit`)
 
-- "stake/unstake" (this is a deposit/withdraw system)
-- "lock/unlock" (tokens are not locked)
-- Generic terms like "tokens" when referring to USTC-cb specifically
+Required behaviors:
 
-## Communication Patterns
+- **Enforce token**:
+  - For `deposit`/`withdraw`, always set `token_address` to the USTC-cb constant.
+  - If the LLM supplies a different token address, reject with a clear error (security).
+- **Fix order sensitivity**:
+  - Rebuild the dict so `token_address` is inserted first (helps `get_decimals_from`).
+- **Resolve `"ALL"` robustly**:
+  - For `deposit` with `"ALL"`:
+    - call `wallet_manager.get_token_balance(USTC_CB_ADDRESS, wallet_address)`
+    - set `parameters["amount"] = <raw_balance int>` (not a string), so `process_parameters()` won’t re-convert it.
+  - For `withdraw` with `"ALL"`:
+    - call `self.handle_view_call("getUserDeposit", {"user": wallet_address})`
+    - set `parameters["amount"] = <deposit_raw int>`
+  - Handle zero amounts with user-friendly errors.
+- **Optionally inject `user`**:
+  - For `getUserDeposit` view calls, if `user` is missing, set it to the active wallet address (this improves robustness when the model forgets).
 
-### For Transaction Confirmations
+Why this belongs in session code (not config):
 
-1. Clear summary of deposit/withdraw action
-2. All relevant amounts
-3. Gas estimate
-4. Simple yes/no confirmation
+- `validate_token_amount_pairs()` and `_ensure_token_approval()` both require `token_address` in **raw params**.
+- `"ALL"` requires live wallet/contract queries, which must be done in Python, not by config defaults.
 
-### When User Says "ALL" for Deposit
+### Step 6: Update Telegram UX: welcome message + view formatting
 
-Return parameters with amount: "ALL" (exact string). The system resolves this to the user's USTC-cb balance.
+File: `commands/llm_app.py`
 
-### When User Says "ALL" for Withdraw
+1) **Welcome message**
 
-Return parameters with amount: "ALL" (exact string). The system resolves this to the user's deposit amount.
+Update `get_llm_app_welcome_message()` to include `ustc_preregister` examples similar to `swap`.
 
-## Error Handling
+2) **View formatting**
 
-### When Insufficient Balance for Deposit
+Update `format_view_result()` to handle the three view methods for this app:
 
-"You don't have enough USTC-cb for this deposit."
+- `getTotalDeposits`: display as human USTC-cb using token decimals
+- `getUserCount`: format as integer with commas
+- `getUserDeposit`: display as “Your Deposit” in human USTC-cb using token decimals
 
-### When Zero Balance
+Implementation notes:
 
-"You have 0 USTC-cb balance."
+- Use `token_manager.get_token_info(USTC_CB_ADDRESS)` to get decimals.
+- Treat contract results as raw `uint256`.
+- Be defensive: if token info lookup fails, fall back to 18 decimals.
 
-### When Zero Deposit
+### Step 7 (optional but recommended): Add app-specific instructions to the system prompt
 
-"You have 0 USTC-cb deposited."
+File: `app/base/llm_interface.py`
 
-## Parameters Required
+In `_build_system_prompt()`, add a small `if session.llm_app_name == "ustc_preregister": ...` block with explicit guidance:
 
-For deposit/withdraw operations, the LLM **must** return:
-- `amount`: The amount to deposit/withdraw (can be "ALL")
-- `token_address`: Must be "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"
+- For deposit/withdraw, include `"amount"` and (optionally) `"token_address"` (even though code injects it)
+- When user says “ALL”, set `"amount": "ALL"` exactly
+- For `getUserDeposit`, include `"user"` as the active wallet address
 
-For getUserDeposit:
-- `user`: The wallet address to check (use the user's active wallet address from context)
-```
+This reduces normalization work and improves model consistency, but **the session-layer enforcement is still required** for correctness and security.
 
----
-
-## Code Changes Required
-
-### Step 5: Modify `app/base/app_session.py`
-
-The current `prepare_write_call()` does NOT handle:
-1. "ALL" amount resolution
-2. Default parameter injection
-
-**Add the following logic at the start of `prepare_write_call()` (after line 211):**
-
-```python
-async def prepare_write_call(
-    self,
-    method_name: str,
-    parameters: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Prepare a write (state-changing) contract call for confirmation."""
-    try:
-        # --- BEGIN NEW CODE: USTC Preregister specific handling ---
-        if self.llm_app_name == "ustc_preregister":
-            USTC_CB_ADDRESS = "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"
-            
-            # Inject token_address if not provided
-            if method_name in ["deposit", "withdraw"] and "token_address" not in parameters:
-                parameters["token_address"] = USTC_CB_ADDRESS
-            
-            # Handle "ALL" amount resolution
-            amount_value = parameters.get("amount", "")
-            if isinstance(amount_value, str) and amount_value.upper() == "ALL":
-                if method_name == "deposit":
-                    # Get USTC-cb balance (returns human-readable Decimal)
-                    balance_info = await wallet_manager.get_token_balance(
-                        USTC_CB_ADDRESS,
-                        self.wallet_info["address"]
-                    )
-                    if balance_info["balance"] <= 0:
-                        raise ValueError("You have 0 USTC-cb balance. Cannot deposit.")
-                    # Convert to string for parameter processing
-                    parameters["amount"] = str(balance_info["balance"])
-                    
-                elif method_name == "withdraw":
-                    # Get user deposit from contract (returns raw uint256)
-                    deposit_raw = await self.handle_view_call(
-                        "getUserDeposit",
-                        {"user": self.wallet_info["address"]}
-                    )
-                    if deposit_raw <= 0:
-                        raise ValueError("You have 0 USTC-cb deposited. Cannot withdraw.")
-                    
-                    # Convert raw to human-readable
-                    from services.tokens import token_manager
-                    token_info = await token_manager.get_token_info(USTC_CB_ADDRESS)
-                    decimals = token_info['decimals'] if token_info else 18
-                    human_amount = deposit_raw / (10 ** decimals)
-                    parameters["amount"] = str(human_amount)
-        # --- END NEW CODE ---
-        
-        # Find method config (existing code continues...)
-        method_config = self._find_method_config(method_name, "write")
-        # ... rest of existing code
-```
-
-### Step 6: Modify `commands/app.py` - Add View Result Formatting
-
-**Update the `format_view_result()` function (around line 436) to handle USTC Preregister:**
-
-```python
-async def format_view_result(method_name: str, result: Any, session: LLMAppSession) -> str:
-    """Format the result of a view call for display."""
-    
-    try:
-        # --- BEGIN NEW CODE: USTC Preregister formatting ---
-        if session.llm_app_name == "ustc_preregister":
-            USTC_CB_ADDRESS = "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"
-            
-            if method_name == "getTotalDeposits":
-                from services.tokens import token_manager
-                token_info = await token_manager.get_token_info(USTC_CB_ADDRESS)
-                decimals = token_info['decimals'] if token_info else 18
-                formatted = result / (10 ** decimals)
-                return f"📊 **Total Deposits:** {formatted:,.6f} USTC-cb"
-                
-            elif method_name == "getUserCount":
-                return f"👥 **Total Users:** {result:,}"
-                
-            elif method_name == "getUserDeposit":
-                from services.tokens import token_manager
-                token_info = await token_manager.get_token_info(USTC_CB_ADDRESS)
-                decimals = token_info['decimals'] if token_info else 18
-                formatted = result / (10 ** decimals)
-                return f"💼 **Your Deposit:** {formatted:,.6f} USTC-cb"
-        # --- END NEW CODE ---
-        
-        # Existing swap formatting...
-        if method_name == "getAmountsOut":
-            # ... existing code
-```
-
-### Step 7: Modify `commands/app.py` - Add Welcome Message
-
-**In `start_specific_app()` (around line 145), add USTC Preregister welcome:**
-
-```python
-if llm_app_name == "swap":
-    welcome_msg += (
-        "I can help you swap tokens on TidalDex! Here are some things you can try:\n\n"
-        # ... existing swap content
-    )
-elif llm_app_name == "ustc_preregister":
-    welcome_msg += (
-        "I can help you interact with the USTC+ Preregister program! Here are some things you can try:\n\n"
-        "• \"show global stats\" - View total deposits and user count\n"
-        "• \"how much have I deposited?\" - Check your deposit amount\n"
-        "• \"deposit ALL\" - Deposit your entire USTC-cb balance\n"
-        "• \"deposit 100\" - Deposit a specific amount\n"
-        "• \"withdraw ALL\" - Withdraw your entire deposit\n\n"
-        "What would you like to do?"
-    )
-else:
-    welcome_msg += "How can I help you today?"
-```
-
-**Also add the same in `start_specific_app_from_callback()` (around line 208).**
-
-### Step 8: Update LLM System Prompt (Optional Enhancement)
-
-**In `app/base/llm_interface.py`, the `_build_system_prompt()` method can be enhanced to add app-specific instructions. Add after line 192:**
-
-```python
-# LLM app-specific instructions
-if session.llm_app_name == "ustc_preregister":
-    system_prompt += """
-
-## USTC Preregister Specific Instructions
-
-- For deposit/withdraw operations, ALWAYS include `token_address: "0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055"` in parameters
-- When user says "deposit ALL" or "withdraw ALL", set amount to the string "ALL" exactly
-- For getUserDeposit, use the user's wallet address from context as the `user` parameter
-"""
-```
-
----
-
-## Parameter Flow Analysis
-
-### Current `process_parameters()` Behavior (transaction_manager.py)
-
-The function iterates over `raw_params.items()`, meaning:
-- It only processes parameters that are **already present** in raw_params
-- **Default values in config are NOT automatically applied**
-- This is why `token_address` must be explicitly set
-
-### Token Resolution in `_resolve_parameter_reference()`
-
-Supports:
-- `"BNB"` → returns `"BNB"`
-- `"path[0]"`, `"path[-1]"`, `"path[N]"` → indexes into path array
-- Direct parameter names → `raw_params.get(param_ref, "")`
-
-Since we use `"token_param": "token_address"`, the token address will be resolved from `raw_params["token_address"]`.
-
-### Token Approval Flow
-
-When `requires_token_approval: true`:
-1. `call_write_method()` calls `_ensure_token_approval()`
-2. Finds `token_amount_pairs` with direction "input", "payment", or "stake"
-3. Resolves token from `token_param` via `_resolve_parameter_reference()`
-4. Checks allowance and approves if needed
-
-For deposit, this correctly approves the USTC-cb token for the preregister contract.
-
----
-
-## Environment Setup
+## Environment setup
 
 Add to `.env`:
+
 ```
-USTC_PREREGISTER_ADDRESS=<contract_address>
+USTC_PREREGISTER_ADDRESS=<deployed_contract_address>
 ```
 
----
+Also ensure existing required env vars are configured (e.g., RPC endpoints, token list URL, etc.) so token metadata calls are reliable.
 
-## Testing Checklist
+## Robust testing plan (automated)
 
-- [ ] App loads correctly from config.json
-- [ ] View calls work: getTotalDeposits, getUserCount, getUserDeposit
-- [ ] View results display with correct formatting and decimals
-- [ ] Deposit with specific amount works
-- [ ] Deposit with "ALL" resolves to correct balance
-- [ ] Withdraw with specific amount works
-- [ ] Withdraw with "ALL" resolves to correct deposit
-- [ ] Token approval is triggered for deposit
-- [ ] Error handling for zero balance/deposit
-- [ ] Welcome message displays correctly
+This app touches both config-driven execution and app-specific normalization logic. The test strategy should cover:
 
----
+### A) Config validation tests (unit)
 
-## Summary of Files to Create/Modify
+Goal: ensure the app is discoverable and passes manager validation.
 
-### Create:
-1. `app/llm_apps/ustc_preregister/abi/USTCPreregister.json` - Copy from `ABI/`
-2. `app/llm_apps/ustc_preregister/config.json` - LLM app configuration
-3. `app/llm_apps/ustc_preregister/STYLE.md` - Style guide for LLM
+- Add a new unit test (pattern matches `tests/test_app_manager_validation.py`) that:
+  - loads/validates the real `ustc_preregister/config.json`
+  - asserts `validate_llm_app_config("ustc_preregister")` returns no errors *when env vars are set in the test environment*
+  - asserts ABI file exists at `app/llm_apps/ustc_preregister/abi/USTCPreregister.json`
 
-### Modify:
-1. `app/base/llm_app_session.py` - Add "ALL" resolution and token_address injection
-2. `commands/llm_app.py` - Add view result formatting and welcome message
-3. `app/base/llm_interface.py` (optional) - Add LLM app-specific LLM instructions
+### B) Session normalization + `"ALL"` resolution (unit, async)
+
+Goal: prove `LLMAppSession.prepare_write_call()` is robust regardless of LLM parameter ordering.
+
+Test cases (mock external calls):
+
+- **Deposit ALL**
+  - Input: `{"amount": "ALL"}` (no `token_address`)
+  - Mock `wallet_manager.get_token_balance()` to return a non-zero raw balance.
+  - Expect:
+    - preview succeeds
+    - `pending_transaction.raw_params["token_address"]` exists and matches the constant
+    - `pending_transaction.raw_params["amount"]` is an `int` raw amount
+- **Withdraw ALL**
+  - Input: `{"amount": "ALL"}` (no `token_address`)
+  - Mock `session.handle_view_call("getUserDeposit", ...)` to return non-zero int
+  - Expect raw int amount and injected token address in pending transaction
+- **Deposit ALL with zero balance**
+  - Mock balance raw = 0
+  - Expect a user-friendly exception
+- **Withdraw ALL with zero deposit**
+  - Mock deposit raw = 0
+  - Expect a user-friendly exception
+- **Wrong token address supplied**
+  - Input includes `token_address` != USTC constant
+  - Expect rejection (security)
+- **Ordering stress**
+  - Input: `{"amount": "1.5", "token_address": "<USTC>"}` and reverse order
+  - Ensure normalization makes conversion deterministic.
+
+### C) View result formatting (unit, async)
+
+Goal: confirm user-facing output is correct and stable.
+
+- Patch `token_manager.get_token_info()` to return various decimals
+- Validate formatted strings for:
+  - `getTotalDeposits` (decimals conversion)
+  - `getUserCount` (commas)
+  - `getUserDeposit` (decimals conversion)
+
+### D) TransactionManager integration surface (fast integration tests)
+
+Goal: ensure config and parameter_processing produce correct `processed_params`.
+
+- Patch `transaction_manager.web3` to `tests.mocks.mock_web3.MockWeb3` or MagicMock (see token resolution tests).
+- Patch ABI loading / contract calls so no RPC is required.
+- Verify:
+  - `prepare_transaction_preview()` produces `processed_params["amount"]` as int
+  - preview includes a valid `summary` and gas estimate object
+
+### E) Manual / staging checklist (non-automated)
+
+Do a quick end-to-end on a test wallet and the real contract:
+
+- Start: `/llm_app ustc_preregister`
+- View:
+  - “show global stats”
+  - “how much have I deposited?”
+- Deposit:
+  - “deposit 1” (verify preview, approval, tx)
+  - “deposit ALL” (verify wallet balance resolution)
+- Withdraw:
+  - “withdraw 1”
+  - “withdraw ALL” (verify contract deposit resolution)
+- Error UX:
+  - try deposit with no balance
+  - try withdraw with no deposit
+
+## Summary of files to create/modify
+
+### Create
+
+- `app/llm_apps/ustc_preregister/abi/USTCPreregister.json`
+- `app/llm_apps/ustc_preregister/config.json`
+- `app/llm_apps/ustc_preregister/STYLE.md`
+
+### Modify
+
+- `app/base/llm_app_session.py`: app-specific normalization + `"ALL"` resolution + safety checks
+- `commands/llm_app.py`: welcome text + `format_view_result()` formatting
+- `app/base/llm_interface.py`: optional app-specific system prompt guidance
+
+### Add tests
+
+- New `tests/test_ustc_preregister_*.py` files covering:
+  - config validation
+  - session `"ALL"` normalization
+  - view formatting

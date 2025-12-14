@@ -45,6 +45,15 @@ def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
             "• \"show me current swap rates\"\n\n"
             "What would you like to do?"
         )
+    elif llm_app_name == "ustc_preregister":
+        welcome_msg += (
+            "I can help you interact with the USTC+ Preregister! Here are some things you can try:\n\n"
+            "• \"show global stats\" or \"how many users have deposited?\"\n"
+            "• \"how much have I deposited?\" or \"check my deposit\"\n"
+            "• \"deposit 10 USTC-cb\" or \"deposit ALL\"\n"
+            "• \"withdraw 5 USTC-cb\" or \"withdraw ALL\"\n\n"
+            "What would you like to do?"
+        )
     else:
         welcome_msg += "How can I help you today?"
     
@@ -589,7 +598,43 @@ async def format_view_result(method_name: str, result: Any, session: LLMAppSessi
     """Format the result of a view call for display."""
     
     try:
-        if method_name == "getAmountsOut":
+        # USTC Preregister app formatting
+        if session.llm_app_name == "ustc_preregister":
+            from services.tokens import token_manager
+            from utils.config import USTC_CB_TOKEN_ADDRESS
+            
+            # USTC-cb token address from config (with default)
+            USTC_CB_ADDRESS = USTC_CB_TOKEN_ADDRESS
+            
+            if method_name == "getTotalDeposits":
+                # Get token info for decimals
+                token_info = await token_manager.get_token_info(USTC_CB_ADDRESS)
+                decimals = token_info['decimals'] if token_info else 18
+                
+                # Convert raw uint256 to human-readable
+                raw_amount = int(result) if result else 0
+                human_amount = raw_amount / (10 ** decimals)
+                
+                return f"**Total Deposits:** {human_amount:,.6f} USTC-cb"
+                
+            elif method_name == "getUserCount":
+                # Format as integer with commas
+                count = int(result) if result else 0
+                return f"**Total Users:** {count:,}"
+                
+            elif method_name == "getUserDeposit":
+                # Get token info for decimals
+                token_info = await token_manager.get_token_info(USTC_CB_ADDRESS)
+                decimals = token_info['decimals'] if token_info else 18
+                
+                # Convert raw uint256 to human-readable
+                raw_amount = int(result) if result else 0
+                human_amount = raw_amount / (10 ** decimals)
+                
+                return f"**Your Deposit:** {human_amount:,.6f} USTC-cb"
+        
+        # Swap app formatting
+        elif method_name == "getAmountsOut":
             # Format swap quote result
             if isinstance(result, list) and len(result) >= 2:
                 # Get token info for formatting

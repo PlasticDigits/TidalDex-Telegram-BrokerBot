@@ -35,6 +35,10 @@ WETH: str = get_env_var('WETH')
 CL8Y_BUY_AND_BURN: str = get_env_var('CL8Y_BUY_AND_BURN')
 CL8Y_BB_FEE_BPS: int = int(get_env_var('CL8Y_BB_FEE_BPS', 100))
 
+# USTC+ Preregister contract addresses
+USTC_CB_TOKEN_ADDRESS: str = get_env_var('USTC_CB_TOKEN_ADDRESS', '0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055')
+USTC_PREREGISTER_ADDRESS: str = get_env_var('USTC_PREREGISTER_ADDRESS', '0xe50DaD8c95dd7A43D792a040146EFaA4801d62B8')
+
 # PIN security settings
 PIN_EXPIRATION_TIME: int = int(get_env_var('PIN_EXPIRATION_TIME', 1800))  # Default: 30 minutes (in seconds)
 

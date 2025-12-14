@@ -313,9 +313,32 @@ class LLMInterface:
 
 {style_section}
 
+## App-Specific Instructions
+
+{self._get_app_specific_instructions(session)}
+
 Remember: Always be helpful, accurate, and security-conscious. Users should understand exactly what transactions they're confirming."""
         
         return system_prompt
+    
+    def _get_app_specific_instructions(self, session: LLMAppSession) -> str:
+        """Get app-specific instructions for the system prompt.
+        
+        Args:
+            session: Active LLM app session
+            
+        Returns:
+            App-specific instruction string
+        """
+        if session.llm_app_name == "ustc_preregister":
+            return """### USTC+ Preregister Specific Guidance
+
+- **For deposit/withdraw**: Always include `"amount"` parameter. Optionally include `"token_address"` (the system will enforce USTC-cb automatically for security).
+- **When user says "ALL"**: Set `"amount": "ALL"` exactly. The system will resolve this to the user's wallet balance (deposit) or contract deposit (withdraw).
+- **For getUserDeposit**: Include `"user"` parameter as the active wallet address. If omitted, the system will auto-inject it.
+- **Token enforcement**: The system automatically enforces USTC-cb token (`0xA4224f910102490Dc02AAbcBc6cb3c59Ff390055`) for all deposit/withdraw operations for security.
+"""
+        return ""
     
     async def _call_openai(
         self, 

@@ -1,0 +1,82 @@
+{
+  "name": "ustc_preregister",
+  "description": "USTC+ Preregister - Deposit and withdraw USTC-cb tokens for the preregistration program",
+  "contracts": {
+    "preregister": {
+      "address_env_var": "USTC_PREREGISTER_ADDRESS",
+      "abi_file": "abi/USTCPreregister.json"
+    }
+  },
+  "available_methods": {
+    "view": [
+      {
+        "name": "getTotalDeposits",
+        "description": "Get total deposits across all users (raw uint256)",
+        "inputs": [],
+        "contract": "preregister"
+      },
+      {
+        "name": "getUserCount",
+        "description": "Get total number of users who have deposited",
+        "inputs": [],
+        "contract": "preregister"
+      },
+      {
+        "name": "getUserDeposit",
+        "description": "Get the deposited amount for a wallet address (raw uint256)",
+        "inputs": ["user"],
+        "contract": "preregister"
+      }
+    ],
+    "write": [
+      {
+        "name": "deposit",
+        "description": "Deposit USTC-cb into the preregister contract",
+        "inputs": ["amount"],
+        "contract": "preregister",
+        "requires_token_approval": true,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "token_address",
+            "amount_param": "amount",
+            "direction": "payment",
+            "display_as": "Deposit {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input}"
+      },
+      {
+        "name": "withdraw",
+        "description": "Withdraw USTC-cb from the preregister contract",
+        "inputs": ["amount"],
+        "contract": "preregister",
+        "requires_token_approval": false,
+        "gas_estimate": "medium",
+        "token_amount_pairs": [
+          {
+            "token_param": "token_address",
+            "amount_param": "amount",
+            "direction": "output",
+            "display_as": "Withdraw {amount} {symbol}"
+          }
+        ],
+        "human_summary": "{input}"
+      }
+    ]
+  },
+  "parameter_processing": {
+    "amount": {
+      "type": "token_amount",
+      "convert_from_human": true,
+      "get_decimals_from": "token_address"
+    },
+    "token_address": {
+      "type": "address"
+    },
+    "user": {
+      "type": "address"
+    }
+  }
+}
+

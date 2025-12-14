@@ -27,7 +27,49 @@ python3 tests/test_llm_response_parsing.py
 python3 tests/test_app_manager_validation.py
 python3 tests/test_llm_edge_cases.py
 python3 tests/test_llm_system_prompt.py
+python3 tests/test_ustc_preregister_config.py
+python3 tests/test_ustc_preregister_normalization.py
+python3 tests/test_ustc_preregister_view_formatting.py
 ```
+
+### USTC Preregister Integration Tests
+
+Run unit tests (no external dependencies):
+```bash
+python3 -m pytest tests/test_ustc_preregister_config.py tests/test_ustc_preregister_normalization.py tests/test_ustc_preregister_view_formatting.py -v
+```
+
+Run live RPC tests (requires BSC RPC):
+```bash
+# Option 1: Set in .env file (recommended)
+# Add RUN_LIVE_TESTS=true to .env
+python3 -m pytest tests/test_ustc_preregister_integration.py::TestUSTCPreregisterLiveRPC -v
+
+# Option 2: Set via environment variable
+RUN_LIVE_TESTS=true python3 -m pytest tests/test_ustc_preregister_integration.py::TestUSTCPreregisterLiveRPC -v
+```
+
+Run live OpenAI API tests (requires OpenAI API key):
+```bash
+# Option 1: Set in .env file (recommended)
+# Add RUN_LIVE_OPENAI_TESTS=1 and OPENAI_API_KEY=sk-... to .env
+python3 -m pytest tests/test_ustc_preregister_integration.py::TestUSTCPreregisterLiveLLM -v
+
+# Option 2: Set via environment variables
+RUN_LIVE_OPENAI_TESTS=1 OPENAI_API_KEY=sk-... python3 -m pytest tests/test_ustc_preregister_integration.py::TestUSTCPreregisterLiveLLM -v
+```
+
+Run all integration tests:
+```bash
+# Option 1: Set in .env file (recommended)
+# Add RUN_LIVE_TESTS=true, RUN_LIVE_OPENAI_TESTS=1, and OPENAI_API_KEY=sk-... to .env
+python3 -m pytest tests/test_ustc_preregister_integration.py -v
+
+# Option 2: Set via environment variables
+RUN_LIVE_TESTS=true RUN_LIVE_OPENAI_TESTS=1 OPENAI_API_KEY=sk-... python3 -m pytest tests/test_ustc_preregister_integration.py -v
+```
+
+**Note:** Integration tests automatically load environment variables from `.env` file in the project root using `dotenv`. You can set variables in `.env` or override them via environment variables.
 
 ## Test Categories
 
@@ -41,6 +83,9 @@ These tests run without database, wallet, or external API access:
 | `test_app_manager_validation.py` | 20 | LLM app configuration validation |
 | `test_llm_edge_cases.py` | 27 | Edge cases for LLM interface |
 | `test_llm_system_prompt.py` | 12 | System prompt building |
+| `test_ustc_preregister_config.py` | 15 | USTC Preregister app config validation |
+| `test_ustc_preregister_normalization.py` | 10 | USTC Preregister parameter normalization (mocked) |
+| `test_ustc_preregister_view_formatting.py` | 3 | USTC Preregister view result formatting |
 
 ### API Tests (Requires External API)
 
@@ -51,6 +96,18 @@ These tests run without database, wallet, or external API access:
 **Requirements:**
 - `OPENAI_API_KEY` must be set in your `.env` file
 - Internet connection for API calls
+
+### Integration Tests (Requires Live Services)
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `test_ustc_preregister_integration.py` | 15+ | USTC Preregister live RPC and OpenAI API tests |
+
+**Requirements:**
+- `RUN_LIVE_TESTS=true` for RPC tests
+- `RUN_LIVE_OPENAI_TESTS=1` and `OPENAI_API_KEY` for LLM tests
+- `USTC_PREREGISTER_ADDRESS` env var (or uses default)
+- Internet connection for BSC RPC and OpenAI API calls
 
 ## Test Coverage
 
@@ -73,6 +130,34 @@ These tests run without database, wallet, or external API access:
 - ✅ Nonexistent app handling
 - ✅ Missing environment variables
 - ✅ Style guide loading (existing, missing, empty)
+
+### USTC Preregister Tests
+
+**Config Validation (`test_ustc_preregister_config.py`):**
+- ✅ Config file existence and JSON validity
+- ✅ Required fields validation
+- ✅ Contracts section configuration
+- ✅ ABI file existence and validity
+- ✅ View and write methods configuration
+- ✅ Parameter processing rules
+- ✅ Manager validation integration
+
+**Normalization (`test_ustc_preregister_normalization.py`):**
+- ✅ Token address enforcement
+- ✅ Invalid token rejection
+- ✅ "ALL" amount resolution for deposits
+- ✅ "ALL" amount resolution for withdrawals
+- ✅ Zero balance/deposit error handling
+- ✅ User address auto-injection
+- ✅ Parameter order normalization
+
+**Integration (`test_ustc_preregister_integration.py`):**
+- ✅ Live RPC view calls (getTotalDeposits, getUserCount, getUserDeposit)
+- ✅ Live RPC normalization (deposit/withdraw ALL)
+- ✅ Live OpenAI API chat responses
+- ✅ Live OpenAI API view call generation
+- ✅ Live OpenAI API write call generation
+- ✅ End-to-end flow (LLM -> RPC -> formatting)
 - ✅ Multiple contracts validation
 - ✅ Empty contracts/methods handling
 - ✅ Special characters in method names

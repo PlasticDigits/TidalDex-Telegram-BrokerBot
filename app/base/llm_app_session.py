@@ -16,6 +16,7 @@ from services.tokens import token_manager
 from services.transaction import transaction_manager, transaction_formatter
 from db.utils import hash_user_id
 from utils.token_utils import format_token_balance
+from utils.config import USTC_CB_TOKEN_ADDRESS, USTC_PREREGISTER_ADDRESS
 
 logger = logging.getLogger(__name__)
 
@@ -400,14 +401,24 @@ class LLMAppSession:
             # Get contract info
             contract_name = method_config.get("contract", list(self.llm_app_config["contracts"].keys())[0])
             contract_config = self.llm_app_config["contracts"][contract_name]
-            contract_address = os.getenv(contract_config["address_env_var"])
+            env_var = contract_config["address_env_var"]
+            
+            # Use config default for USTC_PREREGISTER_ADDRESS if env var not set
+            if env_var == "USTC_PREREGISTER_ADDRESS":
+                contract_address = os.getenv(env_var, USTC_PREREGISTER_ADDRESS)
+            else:
+                contract_address = os.getenv(env_var)
             
             if not contract_address:
-                raise ValueError(f"Contract address not found: {contract_config['address_env_var']}")
+                raise ValueError(f"Contract address not found: {env_var}")
             
             # Load ABI
             abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
             abi = self._load_abi(abi_path)
+            
+            # App-specific normalization (e.g., USTC preregister for getUserDeposit)
+            if self.llm_app_name == "ustc_preregister":
+                parameters = await self._normalize_ustc_preregister_params(method_name, parameters)
             
             # Process parameters
             processed_params = await transaction_manager.process_parameters(
@@ -517,6 +528,10 @@ class LLMAppSession:
             if not method_config:
                 raise ValueError(f"Write method {method_name} not found in LLM app configuration")
             
+            # App-specific normalization (e.g., USTC preregister)
+            if self.llm_app_name == "ustc_preregister":
+                parameters = await self._normalize_ustc_preregister_params(method_name, parameters)
+            
             # Prepare transaction preview (this will process parameters internally)
             preview = await transaction_manager.prepare_transaction_preview(
                 method_config,
@@ -539,9 +554,16 @@ class LLMAppSession:
                 # Load router ABI/address for quote calls
                 contract_name = method_config.get("contract", list(self.llm_app_config["contracts"].keys())[0])
                 contract_config = self.llm_app_config["contracts"][contract_name]
-                contract_address = os.getenv(contract_config["address_env_var"])
+                env_var = contract_config["address_env_var"]
+                
+                # Use config default for USTC_PREREGISTER_ADDRESS if env var not set
+                if env_var == "USTC_PREREGISTER_ADDRESS":
+                    contract_address = os.getenv(env_var, USTC_PREREGISTER_ADDRESS)
+                else:
+                    contract_address = os.getenv(env_var)
+                
                 if not contract_address:
-                    raise ValueError(f"Contract address not found: {contract_config['address_env_var']}")
+                    raise ValueError(f"Contract address not found: {env_var}")
                 abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
                 abi = self._load_abi(abi_path)
 
@@ -616,7 +638,13 @@ class LLMAppSession:
                 list(self.llm_app_config["contracts"].keys())[0]
             )
             contract_config = self.llm_app_config["contracts"][contract_name]
-            contract_address = os.getenv(contract_config["address_env_var"])
+            env_var = contract_config["address_env_var"]
+            
+            # Use config default for USTC_PREREGISTER_ADDRESS if env var not set
+            if env_var == "USTC_PREREGISTER_ADDRESS":
+                contract_address = os.getenv(env_var, USTC_PREREGISTER_ADDRESS)
+            else:
+                contract_address = os.getenv(env_var)
             
             # Load ABI
             abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
@@ -691,6 +719,125 @@ class LLMAppSession:
         except Exception as e:
             logger.error(f"Failed to load ABI from {abi_path}: {str(e)}")
             raise ValueError(f"Could not load ABI file: {abi_path}")
+    
+    async def _normalize_ustc_preregister_params(
+        self,
+        method_name: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Normalize parameters for USTC preregister app.
+        
+        This method:
+        - Enforces USTC-cb token address for deposit/withdraw
+        - Resolves "ALL" amounts by querying wallet balance or contract deposit
+        - Fixes parameter order sensitivity by ensuring token_address is first
+        - Optionally injects user address for getUserDeposit view calls
+        
+        Args:
+            method_name: Name of the contract method
+            parameters: Raw parameters from LLM
+            
+        Returns:
+            Normalized parameters dict
+        """
+        # USTC-cb token address from config (with default)
+        ustc_cb_address = USTC_CB_TOKEN_ADDRESS
+        
+        normalized = dict(parameters)
+        
+        # For deposit/withdraw methods
+        if method_name in ("deposit", "withdraw"):
+            # Enforce token address
+            if "token_address" in normalized:
+                provided_token = normalized["token_address"]
+                try:
+                    # Use Web3's pure checksum utility (does not require RPC/provider)
+                    from web3 import Web3
+                    provided_checksum = Web3.to_checksum_address(str(provided_token))
+                    expected_checksum = Web3.to_checksum_address(str(ustc_cb_address))
+                except ValueError:
+                    raise ValueError(f"Invalid token address format: {provided_token}") from None
+
+                if provided_checksum != expected_checksum:
+                    raise ValueError(
+                        f"Invalid token address for {method_name}. "
+                        f"Only USTC-cb ({ustc_cb_address}) is allowed. "
+                        f"Provided: {provided_token}"
+                    )
+            
+            # Always set token_address to USTC-cb constant
+            normalized["token_address"] = ustc_cb_address
+            
+            # Resolve "ALL" amounts
+            amount_value = normalized.get("amount")
+            if isinstance(amount_value, str) and amount_value.strip().upper() == "ALL":
+                wallet_address = self.wallet_info["address"]
+                
+                if method_name == "deposit":
+                    # Get wallet balance
+                    balance_info = await wallet_manager.get_token_balance(
+                        ustc_cb_address,
+                        wallet_address
+                    )
+                    raw_balance = int(balance_info.get("raw_balance", 0) or 0)
+                    
+                    if raw_balance <= 0:
+                        raise ValueError(
+                            "Cannot deposit ALL: Your USTC-cb wallet balance is zero."
+                        )
+                    
+                    # Set as raw int to bypass human conversion in process_parameters
+                    normalized["amount"] = raw_balance
+                    
+                elif method_name == "withdraw":
+                    # Get user deposit from contract directly (avoid recursion)
+                    # Load contract config
+                    contract_name = "preregister"
+                    contract_config = self.llm_app_config["contracts"][contract_name]
+                    env_var = contract_config["address_env_var"]
+                    
+                    # Use config default for USTC_PREREGISTER_ADDRESS if env var not set
+                    contract_address = os.getenv(env_var, USTC_PREREGISTER_ADDRESS)
+                    
+                    if not contract_address:
+                        raise ValueError(f"Contract address not found: {env_var}")
+                    
+                    # Load ABI
+                    abi_path = f"app/llm_apps/{self.llm_app_name}/{contract_config['abi_file']}"
+                    abi = self._load_abi(abi_path)
+                    
+                    # Call getUserDeposit directly
+                    deposit_result = await transaction_manager.call_view_method(
+                        contract_address,
+                        abi,
+                        "getUserDeposit",
+                        [wallet_address],
+                        status_callback=None,
+                    )
+                    deposit_raw = int(deposit_result) if deposit_result else 0
+                    
+                    if deposit_raw == 0:
+                        raise ValueError(
+                            "Cannot withdraw ALL: You haven't deposited any USTC-cb yet."
+                        )
+                    
+                    # Set as raw int to bypass human conversion
+                    normalized["amount"] = int(deposit_raw)
+            
+            # Fix order sensitivity: ensure token_address comes first
+            # This helps get_decimals_from resolution in process_parameters
+            ordered_params = {"token_address": normalized["token_address"]}
+            for key, value in normalized.items():
+                if key != "token_address":
+                    ordered_params[key] = value
+            normalized = ordered_params
+        
+        # For getUserDeposit view calls, inject user if missing
+        elif method_name == "getUserDeposit":
+            if "user" not in normalized or not normalized.get("user"):
+                normalized["user"] = self.wallet_info["address"]
+        
+        return normalized
     
     async def format_confirmation_message(self) -> str:
         """Format the confirmation message for pending transaction.
