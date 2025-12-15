@@ -3,6 +3,7 @@ LLM app command for conversational blockchain LLM app interactions.
 Allows users to interact with any configured LLM app using natural language.
 """
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from typing import Dict, List, Any, Optional, Union
 import logging
@@ -34,7 +35,9 @@ def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
     Returns:
         Formatted welcome message string
     """
-    welcome_msg = f"🚀 **{llm_app_name.title()} LLM App Started**\n\n{description}\n\n"
+    # Avoid Telegram Markdown parse issues with underscores in app names.
+    display_name = llm_app_name.replace("_", " ").title()
+    welcome_msg = f"🚀 **{escape_markdown(display_name, version=1)} LLM App Started**\n\n{escape_markdown(description, version=1)}\n\n"
     
     if llm_app_name == "swap":
         welcome_msg += (
@@ -58,6 +61,30 @@ def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
         welcome_msg += "How can I help you today?"
     
     return welcome_msg
+
+def _build_available_apps_message(available_llm_apps: List[Dict[str, str]]) -> str:
+    """Build a Markdown-safe message listing available apps.
+
+    Telegram's Markdown parser treats underscores as formatting markers. Since
+    app names may contain underscores (e.g. `ustc_preregister`), we always use a
+    human-friendly display name in the bullet list and escape user/config text.
+    """
+    lines: List[str] = []
+    for llm_app in available_llm_apps:
+        name = llm_app["name"]
+        description = llm_app.get("description", "")
+        display_name = name.replace("_", " ").title()
+        lines.append(
+            f"• **{escape_markdown(display_name, version=1)}**: {escape_markdown(description, version=1)}"
+        )
+
+    first_name = available_llm_apps[0]["name"]
+    return (
+        "🤖 **Blockchain LLM Apps**\n\n"
+        "Choose an LLM app to start conversing:\n\n"
+        + "\n".join(lines)
+        + f"\n\n💡 You can also use `/llm_app {first_name}` to start directly."
+    )
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the LLM app system or show available LLM apps."""
@@ -127,10 +154,7 @@ async def show_available_apps(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="llm_app_cancel")])
     
     await update.message.reply_text(
-        f"🤖 **Blockchain LLM Apps**\n\n"
-        f"Choose an LLM app to start conversing:\n\n"
-        + "\n".join([f"• **{llm_app['name'].title()}**: {llm_app['description']}" for llm_app in available_llm_apps]) +
-        f"\n\n💡 You can also use `/llm_app {available_llm_apps[0]['name']}` to start directly.",
+        _build_available_apps_message(available_llm_apps),
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )

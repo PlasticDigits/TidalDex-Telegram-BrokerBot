@@ -757,7 +757,7 @@ class LLMAppSession:
                     expected_checksum = Web3.to_checksum_address(str(ustc_cb_address))
                 except ValueError:
                     raise ValueError(f"Invalid token address format: {provided_token}") from None
-
+                
                 if provided_checksum != expected_checksum:
                     raise ValueError(
                         f"Invalid token address for {method_name}. "
