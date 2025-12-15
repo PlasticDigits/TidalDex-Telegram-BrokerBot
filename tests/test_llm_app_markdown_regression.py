@@ -19,7 +19,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-from commands.llm_app import _build_available_apps_message, get_llm_app_welcome_message
+from commands.llm_app import (
+    _build_available_apps_message,
+    _build_pin_required_message,
+    get_llm_app_welcome_message,
+)
 
 
 @pytest.mark.unit
@@ -62,6 +66,12 @@ class TestLLMAppMarkdownRegression:
         msg = get_llm_app_welcome_message(
             "ustc_preregister", "USTC+ Preregister - Deposit and withdraw USTC-cb"
         )
+        assert "Ustc Preregister" in msg
+        assert "_" not in msg
+
+    def test_pin_prompt_message_is_markdown_safe_for_underscore_app_name(self) -> None:
+        """Callback PIN prompt must not contain raw underscores (it uses parse_mode=Markdown)."""
+        msg = _build_pin_required_message("ustc_preregister")
         assert "Ustc Preregister" in msg
         assert "_" not in msg
 

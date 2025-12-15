@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # Conversation states
 CHOOSING_APP, CONVERSING, CONFIRMING_TRANSACTION = range(3)
 
+def _llm_app_display_name(llm_app_name: str) -> str:
+    """Convert an internal app name (may contain underscores) to a user-friendly title."""
+    return llm_app_name.replace("_", " ").title()
+
 
 def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
     """Generate welcome message for an LLM app.
@@ -36,7 +40,7 @@ def get_llm_app_welcome_message(llm_app_name: str, description: str) -> str:
         Formatted welcome message string
     """
     # Avoid Telegram Markdown parse issues with underscores in app names.
-    display_name = llm_app_name.replace("_", " ").title()
+    display_name = _llm_app_display_name(llm_app_name)
     welcome_msg = f"🚀 **{escape_markdown(display_name, version=1)} LLM App Started**\n\n{escape_markdown(description, version=1)}\n\n"
     
     if llm_app_name == "swap":
@@ -73,7 +77,7 @@ def _build_available_apps_message(available_llm_apps: List[Dict[str, str]]) -> s
     for llm_app in available_llm_apps:
         name = llm_app["name"]
         description = llm_app.get("description", "")
-        display_name = name.replace("_", " ").title()
+        display_name = _llm_app_display_name(name)
         lines.append(
             f"• **{escape_markdown(display_name, version=1)}**: {escape_markdown(description, version=1)}"
         )
@@ -84,6 +88,14 @@ def _build_available_apps_message(available_llm_apps: List[Dict[str, str]]) -> s
         "Choose an LLM app to start conversing:\n\n"
         + "\n".join(lines)
         + f"\n\n💡 You can also use `/llm_app {first_name}` to start directly."
+    )
+
+def _build_pin_required_message(llm_app_name: str) -> str:
+    """Build a Markdown-safe PIN prompt message for starting an app from callback."""
+    display_name = _llm_app_display_name(llm_app_name)
+    return (
+        f"🔒 Starting **{escape_markdown(display_name, version=1)}** requires your PIN for security.\n\n"
+        "Please enter your PIN."
     )
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -254,8 +266,7 @@ async def start_specific_app_from_callback(
             context.user_data['pending_command'] = 'llm_app_start_from_callback'
             context.user_data['pending_llm_app_name'] = llm_app_name
             await query.edit_message_text(
-                f"🔒 Starting **{llm_app_name.title()}** requires your PIN for security.\n\n"
-                f"Please enter your PIN.",
+                _build_pin_required_message(llm_app_name),
                 parse_mode='Markdown',
             )
             return PIN_REQUEST
